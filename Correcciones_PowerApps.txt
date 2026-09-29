@@ -12,8 +12,9 @@ CONTENIDO
    7. drpMover . OnChange
    8. Los 8 combobox
    9. El resto de formulas
-  10. Propiedades de diseno pendientes, control por control
-  11. Orden de aplicacion y verificacion
+  10. Pendientes finales: division entre cero, idioma y leyenda
+  11. Propiedades de diseno pendientes, control por control
+  12. Orden de aplicacion y verificacion
 
 ==============================================================================
   1. LAS CUATRO CAUSAS DE LOS 112 ERRORES
@@ -360,7 +361,7 @@ If(CountRows(colSelV) = 0;
     Set(varMsg; "Indica la fecha de trasplante");
  varT < LookUp(colLibre; Cod = varGh.Cod).Libre;
     Set(varMsg; varGh.Cod & " esta ocupado hasta el "
-        & Text(LookUp(colLibre; Cod = varGh.Cod).Libre; "[$-es-GT]dd/mm/yyyy"));
+        & Text(LookUp(colLibre; Cod = varGh.Cod).Libre; "dd/mm/yyyy"));
 
     Collect(colCiclos;
         {Lote: "M" & Text(CountRows(colCiclos) + 1; "[$-en-US]000");
@@ -399,7 +400,7 @@ Patch(colLibre; LookUp(colLibre; Cod = varGh.Cod);
 Clear(colSel);;
 Select(btnKPI);;
 Set(varMsg; "Lote " & varLoteM & " creado en " & varGh.Cod & ": "
-    & Text(LookUp(colCiclos; Lote = varLoteM).Plantas; "[$-es-GT]#,##0") & " plantas");;
+    & Text(LookUp(colCiclos; Lote = varLoteM).Plantas; "#,##0") & " plantas");;
 
 ==============================================================================
   7. drpMover . OnChange   (reemplazar todo)
@@ -499,10 +500,10 @@ drpCriterio . Items              colOpcCriterio
 drpCriterio . ItemDisplayText    ThisItem.Nom
 drpCriterio . OnChange           Set(varGBase; Self.Selected.Modo);; Select(btnAgrupar)
 
-drpInvManual . Items             ForAll(colInv As G; {Cod: G.Cod; Nom: G.Cod & " - " & Text(G.Cap; "[$-es-GT]#,##0") & " pl"})
+drpInvManual . Items             ForAll(colInv As G; {Cod: G.Cod; Nom: G.Cod & " - " & Text(G.Cap; "#,##0") & " pl"})
 drpInvManual . ItemDisplayText   ThisItem.Nom
 
-drpMover . Items                 ForAll(Filter(colInv; Find(";" & ThisItem.Cultivo & ";"; Cultivos) > 0 && Cod <> ThisItem.Inv) As G; {Cod: G.Cod; Nom: G.Cod & " - " & Text(G.Cap; "[$-es-GT]#,##0") & " pl"})
+drpMover . Items                 ForAll(Filter(colInv; Find(";" & ThisItem.Cultivo & ";"; Cultivos) > 0 && Cod <> ThisItem.Inv) As G; {Cod: G.Cod; Nom: G.Cod & " - " & Text(G.Cap; "#,##0") & " pl"})
 drpMover . ItemDisplayText       ThisItem.Nom
 
 ==============================================================================
@@ -550,7 +551,157 @@ btnGuardar . OnSelect   (mientras no conectes las listas)
     Set(varMsg; "Conecta PLN_Ciclos y PLN_Asignacion para guardar el plan")
 
 ==============================================================================
-  10. PROPIEDADES DE DISENO PENDIENTES
+  10. PENDIENTES FINALES: division entre cero, idioma y leyenda
+==============================================================================
+
+==============================================================================
+  A. DIVISION ENTRE CERO  (lblLoteInfo, lblLoteFechas, lblVcrL)
+==============================================================================
+Causa: cuando varLoteVer esta vacio, LookUp(colCiclos; Lote = varLoteVer)
+devuelve un registro en blanco y Cap vale 0. Todo porcentaje se protege con
+Max(1; ...) en el divisor.
+
+lblLoteInfo . Text
+    With({C: LookUp(colCiclos; Lote = varLoteVer)};
+        If(IsBlank(C.Lote);
+            "Selecciona un lote de la izquierda";
+            "Trasplante " & Text(C.FechaTrasplante; "dd/mmm") &
+            "   fin " & Text(C.FechaFin; "dd/mmm") &
+            "   libre " & Text(C.FechaLibre; "dd/mmm") & Char(10) &
+            Text(C.Plantas; "#,##0") & " de " & Text(C.Cap; "#,##0") &
+            " plantas (" & Text(C.Plantas / Max(1; C.Cap); "[$-en-US]0%") & ")"))
+
+lblLoteFechas . Text        (dentro de galLotes)
+    "Trasplante " & Text(ThisItem.FechaTrasplante; "dd/mmm") &
+    "   fin " & Text(ThisItem.FechaFin; "dd/mmm") &
+    "   libre " & Text(ThisItem.FechaLibre; "dd/mmm") & Char(10) &
+    Text(ThisItem.Plantas; "#,##0") & " / " & Text(ThisItem.Cap; "#,##0") &
+    " pl (" & Text(ThisItem.Plantas / Max(1; ThisItem.Cap); "[$-en-US]0%") & ")"
+
+lblVcrL . Text              (dentro de galVCRLote)
+    ThisItem.VCRID & "   " & Text(ThisItem.Plantas; "#,##0") & " pl   (" &
+    Text(ThisItem.Plantas /
+         Max(1; LookUp(colCiclos; Lote = varLoteVer).Cap); "[$-en-US]0%") &
+    " del lote)"
+
+htmlLoteMeter . HtmlText
+    With({C: LookUp(colCiclos; Lote = varLoteVer)};
+        "<div style='height:8px;width:100%;background:#e6e6dd;border-radius:9px;'>" &
+        "<div style='height:8px;width:" &
+        Text(Min(100; C.Plantas / Max(1; C.Cap) * 100); "[$-en-US]0.##") &
+        "%;background:#2c7a5d;border-radius:9px;'></div></div>")
+
+==============================================================================
+  B. EL CODIGO DE IDIOMA es-GT NO ES COMPATIBLE
+==============================================================================
+Causa: [$-es-GT] no esta en la lista de idiomas que acepta Text() en este
+entorno. La solucion es quitar el prefijo: sin etiqueta, Text() usa el idioma
+de la app, que ya es espanol.
+
+REEMPLAZO GLOBAL en todas las formulas de la pantalla:
+    "#,##0"      ->   "#,##0"
+    "dd/mmm"     ->   "dd/mmm"
+    "dd/mm/yyyy" ->   "dd/mm/yyyy"
+    "[$-es-GT]mmm"        ->   "mmm"
+
+NO tocar [$-en-US]. Ese se queda donde esta, porque fuerza el punto decimal
+que necesita el CSS de los controles HTML.
+
+Controles afectados:
+    btnKPI.OnSelect        lblCap.Text            lblPlantas.Text
+    lblAsignado.Text       lblGrupo.Text          lblResumenSel.Text
+    lblResPlantas.Text     lblResCap.Text         lblModalSub.Text
+    lblPlantasL.Text       lblSiembraL.Text       lblEarly.Text
+    lblLast.Text           lblVentana.Text        htmlOcup.HtmlText
+    htmlRegla.HtmlText     drpInvManual.Items     drpMover.Items
+    btnAsignarManual.OnSelect                     btnAuto.OnSelect
+
+lblKPIVal . Text
+    ThisItem.Val
+lblKPIVal . Color
+    Switch(ThisItem.Alerta;
+        "ok";  RGBA(12; 163; 12; 1);
+        "mal"; RGBA(208; 59; 59; 1);
+        RGBA(18; 18; 14; 1))
+lblKPILab . Text
+    ThisItem.Lab
+lblKPISub . Text
+    ThisItem.Sub
+
+==============================================================================
+  C. galLeyenda: QUE INFORMACION LLEVA
+==============================================================================
+Es la leyenda de colores de la linea de tiempo: un cuadro del color del
+cultivo, su nombre y los dias de ciclo. Cinco filas, una por cultivo.
+
+galLeyenda . Items
+    colCultivos
+galLeyenda . Layout
+    Layout.Horizontal
+galLeyenda . TemplateSize
+    150
+
+Dentro de la plantilla, dos controles:
+
+recLeyendaColor       Rectangulo
+    Fill              ColorValue(ThisItem.Hex)
+    Width             12
+    Height            12
+    X                 6
+    Y                 14
+    RadiusTopLeft / RadiusTopRight / RadiusBottomLeft / RadiusBottomRight   3
+
+lblLeyenda            Etiqueta
+    Text              ThisItem.ES & "  " & ThisItem.Ciclo & " d"
+    X                 24
+    Y                 8
+    Width             120
+    Height            24
+    Size              9
+
+==============================================================================
+  D. UBICACION DE htmlRegla Y htmlOcup
+==============================================================================
+Las dos estan bien donde estan. Confirmacion del orden dentro de conTL:
+
+conTL   (contenedor vertical)
+  1. conFiltrosTL     Height 52    drpBloque, drpCultivoTL, galLeyenda
+  2. conRegla         Height 40    lblReglaCap (Width 178) + htmlRegla (Fill 1)
+  3. galTimeline      FillPortions 1
+  4. conOcup          Height 150   lblOcupLab (Width 178) + htmlOcup (Fill 1)
+
+htmlRegla dibuja los meses y las semanas; tiene que quedar a la derecha de
+lblReglaCap y con el mismo ancho que las barras de galTimeline, por eso
+lblReglaCap y lblCod+lblCap suman los mismos 178 px.
+
+htmlOcup dibuja las barras de ocupacion semanal; mismo criterio, a la derecha
+de lblOcupLab con sus 178 px.
+
+==============================================================================
+  E. conInvHdr Y galInv: CONFIRMACION DE ORDEN
+==============================================================================
+El orden de conInvHdr debe ser identico al de conInvFila, y los anchos
+tambien, o las columnas no cuadran:
+
+  POSICION  ENCABEZADO        ANCHO    FILA (conInvFila)
+  1         lblHdrCod          90      btnVerCasa
+  2         lblHdrBloque      130      lblBloque
+  3         lblHdrTipo        100      lblTipo
+  4         lblHdrCultivos    Fill 1   lblCultivos
+  5         lblHdrDens         90      inpDens
+  6         lblHdrCap         100      inpCap
+  7         lblHdrDisp        150      dtpDisp
+  8         lblHdrCiclos       80      lblCiclos
+  9         lblHdrUso         120      htmlUso
+
+Las nueve etiquetas del encabezado comparten:
+    Height 34   FillPortions 0 (salvo lblHdrCultivos, que va en 1)
+    AlignInContainer  AlignInContainer.Stretch
+    Size 10     FontWeight  FontWeight.Semibold
+    Color       RGBA(132; 131; 122; 1)
+
+==============================================================================
+  11. PROPIEDADES DE DISENO PENDIENTES
 ==============================================================================
 
 Solo las diferencias contra el diseno objetivo. Lo que ya esta correcto
@@ -1381,7 +1532,7 @@ con su Width o Height fijo.
 
 
 ==============================================================================
-  11. ORDEN DE APLICACION Y VERIFICACION
+  12. ORDEN DE APLICACION Y VERIFICACION
 ==============================================================================
 
   1. Crear las 5 listas de la seccion 2 y agregarlas en Agregar datos.
