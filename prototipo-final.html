@@ -1,0 +1,847 @@
+<title>Planificador de Invernaderos</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f4f4ef; --surface:#fdfdfb; --surface-2:#eeeee7; --surface-3:#e6e6dd;
+  --ink:#12120e; --ink-2:#55544c; --muted:#84837a;
+  --line:#e0dfd6; --line-2:#c7c6ba;
+  --accent:#1f5c46; --accent-2:#2c7a5d; --on-accent:#ffffff;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --crit:#d03b3b;
+  --Tomato:#2a78d6; --Pepper:#eb6834; --Melon:#eda100; --Watermelon:#1baf7a; --Cucumber:#e87ba4;
+  --bloqueo:#b9b8ac;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --disp:"Archivo","IBM Plex Sans",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --r:8px; --lbl:178px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#0d0d0c; --surface:#1a1a18; --surface-2:#232320; --surface-3:#2b2b27;
+    --ink:#ffffff; --ink-2:#c3c2b7; --muted:#8e8d84;
+    --line:#2c2c29; --line-2:#3c3c37;
+    --accent:#3f9c77; --accent-2:#4fae86; --on-accent:#08130f;
+    --Tomato:#3987e5; --Pepper:#d95926; --Melon:#c98500; --Watermelon:#199e70; --Cucumber:#d55181;
+    --bloqueo:#4a4a44; --crit:#e66767;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0d0d0c; --surface:#1a1a18; --surface-2:#232320; --surface-3:#2b2b27;
+  --ink:#ffffff; --ink-2:#c3c2b7; --muted:#8e8d84;
+  --line:#2c2c29; --line-2:#3c3c37;
+  --accent:#3f9c77; --accent-2:#4fae86; --on-accent:#08130f;
+  --Tomato:#3987e5; --Pepper:#d95926; --Melon:#c98500; --Watermelon:#199e70; --Cucumber:#d55181;
+  --bloqueo:#4a4a44; --crit:#e66767;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px;line-height:1.45;
+  -webkit-text-size-adjust:100%}
+.wrap{padding-inline:16px;padding-block:14px 40px;max-width:1560px;margin:0 auto;
+  display:flex;flex-direction:column;gap:12px;min-width:0}
+h1,h2,h3{font-family:var(--disp);margin:0;text-wrap:balance}
+h1{font-size:19px;font-weight:700;letter-spacing:-.01em}
+h2{font-size:15px;font-weight:600}
+h3{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:16px 0 7px}
+p{margin:0 0 8px}
+.num{font-variant-numeric:tabular-nums}
+.hint{font-size:11.5px;color:var(--muted)}
+.mini{font-size:12px;color:var(--ink-2)}
+
+/* ---- marcas de control ---- */
+[data-ctl]{position:relative}
+body.ctl [data-ctl]{outline:1px dashed color-mix(in srgb,var(--accent-2) 55%,transparent);outline-offset:-1px}
+body.ctl [data-ctl]::before{content:attr(data-ctl);position:absolute;top:0;left:0;z-index:20;
+  font-family:var(--mono);font-size:9px;line-height:1.5;padding:0 4px;pointer-events:none;
+  background:var(--accent);color:var(--on-accent);border-radius:0 0 4px 0;white-space:nowrap}
+
+/* ---- barra superior ---- */
+.top{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px}
+.brand{display:flex;gap:10px;align-items:center}
+.brand .glyph{width:32px;height:32px;border-radius:7px;background:var(--accent);color:var(--on-accent);
+  display:grid;place-items:center;font-family:var(--disp);font-weight:700;font-size:13px;flex:none}
+.brand p{color:var(--muted);font-size:11.5px;margin:0}
+.ctl{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+label.f{display:flex;flex-direction:column;gap:3px;font-size:10px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+select,input[type=date],input[type=number],input[type=text]{font-family:var(--sans);font-size:12.5px;
+  background:var(--surface);color:var(--ink);border:1px solid var(--line-2);border-radius:6px;padding:5px 7px}
+input[type=number]{width:72px;font-variant-numeric:tabular-nums}
+.btn{font-family:var(--sans);font-size:12.5px;font-weight:500;background:var(--surface-2);color:var(--ink);
+  border:1px solid var(--line-2);border-radius:6px;padding:7px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--surface-3)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+.btn.primary:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.btn.mini{padding:3px 8px;font-size:11px}
+.sw{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-2);cursor:pointer;
+  border:1px solid var(--line-2);border-radius:99px;padding:5px 11px;background:var(--surface)}
+.sw input{margin:0}
+:focus-visible{outline:2px solid var(--accent-2);outline-offset:2px}
+
+/* ---- aviso ---- */
+.aviso{display:flex;gap:11px;align-items:flex-start;background:color-mix(in srgb,var(--warn) 13%,var(--surface));
+  border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line-2));border-radius:var(--r);padding:11px 13px}
+.aviso b{font-family:var(--disp)}
+.aviso .i{width:22px;height:22px;border-radius:50%;background:var(--warn);color:#3a2800;flex:none;
+  display:grid;place-items:center;font-weight:700;font-size:13px;font-family:var(--disp)}
+
+/* ---- kpis ---- */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:9px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:10px 12px}
+.kpi .lab{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+.kpi .val{font-family:var(--disp);font-size:23px;font-weight:600;line-height:1.15;margin-top:2px;
+  font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:11px;color:var(--ink-2)}
+.kpi.ok .val{color:var(--good)} .kpi.mal .val{color:var(--crit)}
+
+/* ---- tabs ---- */
+.tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line)}
+.tab{font-family:var(--disp);font-size:12.5px;font-weight:600;background:none;border:none;
+  border-bottom:2px solid transparent;color:var(--muted);padding:8px 13px;cursor:pointer;border-radius:6px 6px 0 0}
+.tab:hover{color:var(--ink);background:var(--surface-2)}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent)}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:13px}
+.card + .card{margin-top:11px}
+.card-hd{display:flex;gap:10px;align-items:baseline;justify-content:space-between;flex-wrap:wrap;margin-bottom:9px}
+
+/* ---- leyenda ---- */
+.legend{display:flex;gap:11px;flex-wrap:wrap;align-items:center;font-size:11.5px;color:var(--ink-2)}
+.legend span{display:flex;gap:5px;align-items:center}
+.dot{width:11px;height:11px;border-radius:3px;flex:none;display:inline-block}
+.dot.vent{background:var(--surface-3);border:1px solid var(--line-2)}
+.dot.prod{background:repeating-linear-gradient(45deg,var(--bloqueo) 0 3px,transparent 3px 6px);border:1px solid var(--line-2)}
+
+/* ---- timeline ---- */
+main,section,.card,.tw,.scroller{min-width:0;max-width:100%}
+.scroller{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+.grid{min-width:1420px}
+.row{display:grid;grid-template-columns:var(--lbl) 1fr;align-items:stretch}
+.lbl{position:sticky;left:0;z-index:3;background:var(--surface);border-right:1px solid var(--line-2);
+  padding:3px 9px;display:flex;align-items:center;gap:6px;justify-content:space-between}
+.lbl .cod{font-family:var(--disp);font-weight:600;font-size:11.5px}
+.lbl .cap{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums}
+.track{position:relative;height:100%;
+  background-image:linear-gradient(to right,var(--line) 0 1px,transparent 1px 100%);
+  background-size:calc(100%/56) 100%}
+.row.grp{background:var(--surface-2)}
+.row.grp .lbl{background:var(--surface-2);font-family:var(--disp);font-weight:600;font-size:10.5px;
+  text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);padding-block:5px}
+.row.grp .track{background:var(--surface-2);border-bottom:1px solid var(--line-2)}
+.row.gh{border-bottom:1px solid var(--line);height:30px}
+.row.gh:hover .lbl{background:var(--surface-2)}
+.row.gh .track{height:30px}
+.ruler{position:sticky;top:0;z-index:4;background:var(--surface);border-bottom:1px solid var(--line-2)}
+.ruler .lbl{background:var(--surface);z-index:5}
+.months{position:relative;height:20px}
+.months i{position:absolute;top:0;height:20px;border-left:1px solid var(--line-2);padding-left:4px;
+  font-style:normal;font-size:10px;font-weight:600;color:var(--ink-2);text-transform:uppercase;
+  letter-spacing:.05em;overflow:hidden;line-height:20px}
+.weeks{position:relative;height:15px;border-top:1px solid var(--line)}
+.weeks i{position:absolute;top:0;font-style:normal;font-size:9px;color:var(--muted);
+  font-variant-numeric:tabular-nums;transform:translateX(-50%);white-space:nowrap;line-height:15px}
+.bar{position:absolute;top:5px;height:20px;border-radius:4px;display:flex;align-items:center;
+  padding:0 5px;font-size:9.5px;font-weight:600;color:#fff;overflow:hidden;white-space:nowrap;cursor:pointer;
+  box-shadow:0 0 0 2px var(--surface)}
+.bar:hover{filter:brightness(1.08)}
+.seg-vent{position:absolute;top:5px;height:20px;background:var(--surface-3);border:1px solid var(--line-2);
+  border-radius:0 4px 4px 0;box-sizing:border-box}
+.seg-semi{position:absolute;top:11px;height:8px;border-radius:3px;
+  background:repeating-linear-gradient(45deg,currentColor 0 2px,transparent 2px 4px);opacity:.7}
+.blq{position:absolute;top:0;height:100%;background:repeating-linear-gradient(45deg,var(--bloqueo) 0 3px,transparent 3px 6px);
+  opacity:.5;border-right:1px solid var(--line-2)}
+
+/* ---- grafico ocupacion ---- */
+.chartrow{border-top:2px solid var(--line-2)}
+.chartrow .lbl{flex-direction:column;align-items:flex-start;gap:2px;justify-content:center;padding-block:8px}
+.chart{position:relative;height:130px;display:flex;align-items:flex-end;padding:0 1px}
+.gline{position:absolute;left:0;right:0;border-top:1px dashed var(--line);font-size:9px;color:var(--muted)}
+.gline b{position:absolute;left:2px;top:-11px;font-weight:500;font-variant-numeric:tabular-nums}
+.wk{position:relative;flex:1 1 0;height:100%;display:flex;flex-direction:column;justify-content:flex-end;
+  align-items:center;min-width:0;z-index:1}
+.wk i{display:block;width:70%;background:#2a78d6;border-radius:2px 2px 0 0}
+.wk:hover{background:color-mix(in srgb,var(--accent) 13%,transparent)}
+
+/* ---- tablas ---- */
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12px;min-width:640px}
+th,td{text-align:left;padding:5px 9px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{font-family:var(--disp);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+  font-weight:600;position:sticky;top:0;background:var(--surface);z-index:1;border-bottom:1px solid var(--line-2)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr:hover{background:var(--surface-2)}
+tr.sel{background:color-mix(in srgb,var(--accent) 11%,transparent)}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;padding:2px 7px;
+  border-radius:99px;border:1px solid var(--line-2);background:var(--surface-2);color:var(--ink-2);white-space:nowrap}
+.pill.ok{color:var(--good);border-color:color-mix(in srgb,var(--good) 45%,var(--line-2))}
+.pill.late{color:var(--serious);border-color:color-mix(in srgb,var(--serious) 55%,var(--line-2))}
+.pill.bad{color:var(--crit);border-color:color-mix(in srgb,var(--crit) 45%,var(--line-2))}
+.meter{position:relative;height:7px;border-radius:99px;background:var(--surface-3);overflow:hidden;min-width:56px}
+.meter i{position:absolute;left:0;top:0;bottom:0;border-radius:99px;background:var(--accent-2)}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.chip{border:1px solid var(--line-2);border-radius:8px;background:var(--surface);padding:6px 9px;
+  display:flex;align-items:center;gap:8px;font-size:11.5px}
+.chip .gt{display:flex;flex-direction:column;line-height:1.3}
+.chip .gt b{font-family:var(--disp);font-size:11.5px}
+.chip .gt span{color:var(--muted);font-size:10px;font-variant-numeric:tabular-nums}
+
+/* ---- flujo ---- */
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr));gap:11px;margin:12px 0}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px;position:relative}
+.step .n{font-family:var(--disp);font-size:10px;font-weight:700;color:var(--on-accent);background:var(--accent);
+  width:20px;height:20px;border-radius:5px;display:grid;place-items:center;margin-bottom:7px}
+.step h4{font-family:var(--disp);font-size:12.5px;margin:0 0 4px}
+.step p{font-size:11.5px;color:var(--ink-2);margin:0}
+.step code{font-size:11px}
+code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:4px;padding:1px 4px}
+pre{margin:9px 0;background:var(--surface-2);border:1px solid var(--line-2);border-radius:7px;padding:10px 11px;
+  overflow-x:auto;font-family:var(--mono);font-size:11.5px;line-height:1.55}
+pre code{background:none;border:none;padding:0}
+.note{border-left:3px solid var(--accent-2);background:var(--surface-2);border-radius:0 7px 7px 0;
+  padding:9px 12px;margin:10px 0}
+.note.crit{border-left-color:var(--crit)}
+.note p:last-child{margin-bottom:0}
+ol,ul{margin:0 0 8px;padding-left:19px} li{margin-bottom:4px}
+
+/* ---- popup ---- */
+.modal[hidden]{display:none}
+.modal{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:14px}
+.modal-bd{position:absolute;inset:0;background:rgba(8,8,6,.55)}
+.modal-box{position:relative;background:var(--surface);border:1px solid var(--line-2);border-radius:10px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35);width:min(900px,100%);max-height:86vh;overflow:auto}
+.modal-hd{position:sticky;top:0;background:var(--surface);border-bottom:1px solid var(--line-2);padding:11px 13px;
+  display:flex;gap:12px;align-items:flex-start;justify-content:space-between;z-index:2}
+.modal-in{padding:13px}
+.lote{border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:9px}
+.lote.act{border-color:var(--accent-2);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent-2) 20%,transparent)}
+.lote-hd{display:flex;gap:9px;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:6px}
+.lote-hd .t{font-family:var(--disp);font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px}
+.lote table{min-width:0} .lote td,.lote th{padding:4px 6px;font-size:11px}
+#tip{position:fixed;z-index:60;pointer-events:none;opacity:0;transition:opacity .09s;max-width:290px;
+  background:var(--surface);color:var(--ink);border:1px solid var(--line-2);border-radius:7px;
+  box-shadow:0 8px 26px rgba(0,0,0,.18);padding:9px 11px;font-size:11.5px}
+#tip h4{font-family:var(--disp);font-size:12px;margin:0 0 4px}
+#tip .kv{display:flex;justify-content:space-between;gap:14px;color:var(--ink-2)}
+#tip .kv b{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+@media (max-width:760px){ :root{--lbl:118px} .grid{min-width:1360px} h1{font-size:17px} }
+</style>
+
+<div class="wrap">
+  <header class="top" data-ctl="conHeader">
+    <div class="brand" data-ctl="conMarca">
+      <span class="glyph">IV</span>
+      <div>
+        <h1>Planificador de invernaderos</h1>
+        <p>Salama Station · campaña 2026 · 186 VCR · 33 casas</p>
+      </div>
+    </div>
+    <div class="ctl" data-ctl="conCtrl">
+      <label class="f">Ventana<input type="number" id="pVent" value="7" min="0" max="45"></label>
+      <label class="f">Agrupar ±d<input type="number" id="pGrp" value="10" min="0" max="45"></label>
+      <label class="f">Sobrecupo %<input type="number" id="pSob" value="5" min="0" max="25"></label>
+      <button class="btn primary" id="btnAuto">Asignar automáticamente</button>
+      <button class="btn" id="btnLimpiar">Limpiar</button>
+      <label class="sw"><input type="checkbox" id="swCtl"> Nombres de control</label>
+    </div>
+  </header>
+
+  <div class="aviso" id="aviso">
+    <span class="i">!</span>
+    <div>
+      <b>¿Tu app no muestra nada?</b> No es el diseño: <code>PLN_VCR</code> está vacía o sin conectar.
+      El motor lee <code>colVCRsp = Filter(PLN_VCR; Anio = varAnio; SiteName = varSitio)</code>, y si esa
+      consulta no devuelve filas, <code>colVCR</code> queda vacía y no hay nada que planificar.
+      La pestaña <b>Cómo cargar los VCR</b> tiene los cuatro pasos.
+      <button class="btn mini" id="btnFlujo" style="margin-left:8px">Ver ahora</button>
+    </div>
+  </div>
+
+  <section class="kpis" id="kpis" data-ctl="galKPI"></section>
+
+  <nav class="tabs" role="tablist" data-ctl="galTabs">
+    <button class="tab" role="tab" data-t="TL" aria-selected="true">Línea de tiempo</button>
+    <button class="tab" role="tab" data-t="INV" aria-selected="false">Invernaderos</button>
+    <button class="tab" role="tab" data-t="VCR" aria-selected="false">Solicitudes VCR</button>
+    <button class="tab" role="tab" data-t="ASG" aria-selected="false">Asignación</button>
+    <button class="tab" role="tab" data-t="PAR" aria-selected="false">Parámetros</button>
+    <button class="tab" role="tab" data-t="FLU" aria-selected="false">Cómo cargar los VCR</button>
+  </nav>
+
+  <main data-ctl="conBody">
+    <!-- ============ LÍNEA DE TIEMPO ============ -->
+    <section id="tab-TL" data-ctl="conTL">
+      <div class="card">
+        <div class="card-hd" data-ctl="conFiltrosTL">
+          <div>
+            <h2>Ocupación por invernadero, semana a semana</h2>
+            <p class="hint">Cada barra es un ciclo: del trasplante al fin de cosecha, más la ventana de limpieza.
+              El rayado previo es el tiempo en semillero. 56 semanas desde el 1 de noviembre.</p>
+          </div>
+          <div class="ctl">
+            <label class="f">Bloque<select id="fBloque"></select></label>
+            <label class="f">Cultivo<select id="fCultivo"></select></label>
+          </div>
+        </div>
+        <div class="legend" id="leyenda" data-ctl="galLeyenda"></div>
+        <div class="scroller" style="margin-top:9px">
+          <div class="grid" id="tl" data-ctl="galTimeline"></div>
+        </div>
+        <p class="hint" style="margin-top:7px">Clic en una barra para abrir la casa y ver sus VCR.</p>
+      </div>
+    </section>
+
+    <!-- ============ INVERNADEROS ============ -->
+    <section id="tab-INV" hidden data-ctl="conINV">
+      <div class="card">
+        <div class="card-hd">
+          <div><h2>Capacidad instalada</h2>
+            <p class="hint">Capacidad = área × densidad. «Disponible desde» libera la casa cuando termina el ciclo que hoy está en producción.</p></div>
+          <span class="pill" id="capTot"></span>
+        </div>
+        <div class="tw"><table id="tInv" data-ctl="galInv"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ VCR ============ -->
+    <section id="tab-VCR" hidden data-ctl="conVCR">
+      <div class="card">
+        <div class="card-hd"><div><h2>Solicitudes de siembra</h2>
+          <p class="hint">Origen: <code>PLN_VCR</code>. Ocho columnas del archivo; las demás no influyen en la distribución.</p></div></div>
+        <div data-ctl="conGrupos">
+          <h3>Grupos por ventana compartida</h3>
+          <div class="chips" id="grupos" data-ctl="galGrupos"></div>
+        </div>
+        <div class="tw" style="margin-top:12px"><table id="tVcr" data-ctl="galVCR"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ ASIGNACIÓN ============ -->
+    <section id="tab-ASG" hidden data-ctl="conASG">
+      <div class="card">
+        <div class="card-hd"><div><h2>Resumen por invernadero</h2>
+          <p class="hint">Ciclos logrados en el año y aprovechamiento de la capacidad.</p></div></div>
+        <div class="tw"><table id="tRes" data-ctl="galResumen"></table></div>
+      </div>
+      <div class="card">
+        <div class="card-hd"><div><h2>Detalle de asignación</h2>
+          <p class="hint">Una fila por VCR y por invernadero: un VCR grande se parte entre varias casas.</p></div></div>
+        <div class="tw"><table id="tAsg" data-ctl="galAsign"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ PARÁMETROS ============ -->
+    <section id="tab-PAR" hidden data-ctl="conPAR">
+      <div class="card">
+        <div class="card-hd"><div><h2>Ciclo por cultivo</h2>
+          <p class="hint">Días en semillero y días que el cultivo ocupa el invernadero. Cambiar cualquiera replanifica el año.</p></div></div>
+        <div class="tw"><table id="tCul" data-ctl="galCultivos"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ FLUJO ============ -->
+    <section id="tab-FLU" hidden>
+      <div class="card">
+        <h2>Cómo cargar los VCR y que el sistema asigne</h2>
+        <p class="mini">El motor no inventa datos: lee <code>PLN_VCR</code>. Si esa lista está vacía o no está
+          conectada, la línea de tiempo sale en blanco aunque todas las fórmulas estén correctas.</p>
+
+        <div class="flow">
+          <div class="step"><div class="n">1</div><h4>Preparar el Excel</h4>
+            <p>Del archivo original deja solo ocho columnas: <code>VCR ID</code>, <code>VCR Name</code>,
+              <code>Crop Name</code>, <code>PPEL Home Site Name</code>, <code>Earliest Start Date</code>,
+              <code>Latest Start Date</code>, <code>VCR Plants</code> y <code>Status</code>. Agrega una
+              columna <code>Anio</code> con 2026.</p></div>
+          <div class="step"><div class="n">2</div><h4>Convertir las fechas</h4>
+            <p>Vienen como <code>d/m/aaaa</code>. Conviértelas a fecha real en Excel antes de pegar,
+              o con Excel en inglés vas a voltear día y mes en todo lo anterior al día 13.</p></div>
+          <div class="step"><div class="n">3</div><h4>Pegar en SharePoint</h4>
+            <p>Abre <code>PLN_VCR</code>, botón <b>Editar en vista de cuadrícula</b>, y pega las 227 filas.
+              Verifica que <code>VCRPlants</code> quedó como número y no como texto.</p></div>
+          <div class="step"><div class="n">4</div><h4>Conectar y ejecutar</h4>
+            <p>En Power Apps, <b>Agregar datos</b> → <code>PLN_VCR</code>. Luego abre <code>scrPlan</code>,
+              que dispara <code>OnVisible</code>, y presiona <b>Asignar automáticamente</b>.</p></div>
+        </div>
+
+        <h3>Qué pasa por dentro al presionar el botón</h3>
+        <pre><code>PLN_VCR  (227 filas en SharePoint)
+   |
+   |  scrPlan.OnVisible  ->  Filter por Anio y SiteName
+   v
+colVCRsp  (186 filas: se descartan cancelados y VCR de 0 plantas)
+   |
+   |  ForAll + LookUp(colCultivos)  ->  agrega semillero, ciclo y ventana
+   v
+colVCR    TEarly = Earliest + DiasSemillero
+          TLast  = Latest   + DiasSemillero
+   |
+   |  btnAgrupar  ->  junta VCR del mismo cultivo con ventanas que se traslapan
+   v
+colGrupos
+   |
+   |  btnAuto  ->  6 pasadas: unir a un lote con cupo, o abrir lote nuevo
+   v
+colCiclos  (un lote por casa y fecha)  +  colAsign  (un VCR dentro de un lote)
+   |
+   |  btnKPI  ->  colOcup y colKPI
+   v
+galTimeline / galKPI / galAsign</code></pre>
+
+        <h3>Cómo se decide dónde entra cada VCR</h3>
+        <ol class="mini">
+          <li><b>Orden:</b> primero el que vence antes, por <code>TLast</code>. A igual fecha, el más grande.</li>
+          <li><b>¿Hay lote abierto?</b> Se busca un lote del mismo cultivo, con cupo, cuya fecha de trasplante
+            caiga dentro de la ventana del VCR más la tolerancia de agrupación. Si existe, el VCR entra ahí.</li>
+          <li><b>Si no hay,</b> se abre un lote nuevo en la casa compatible que se libere primero; a igual
+            fecha, la de mayor capacidad. La compatibilidad sale de <code>CultivosPermitidos</code>.</li>
+          <li><b>Sobrecupo:</b> si al VCR le falta menos del 5% de la casa para entrar completo, entra completo
+            en vez de partirse. Eso evita lotes de 30 plantas.</li>
+          <li><b>Lo que no cabe</b> queda pendiente y se reintenta en la siguiente pasada, en otra casa.
+            Por eso un VCR grande aparece repartido en dos o tres invernaderos.</li>
+          <li><b>Al terminar,</b> lo que siga pendiente se marca <b>Sin cupo</b>: no hay casa libre antes del
+            fin del horizonte.</li>
+        </ol>
+
+        <div class="note crit">
+          <p><b>Si sigue sin mostrar nada después de cargar los datos</b>, revisa en este orden:
+            que <code>varAnio</code> valga lo mismo que la columna <code>Anio</code> de la lista;
+            que <code>varSitio</code> coincida exacto con <code>SiteName</code> — «Salama Station» con espacio y mayúsculas;
+            y que <code>colCultivos</code> tenga los nombres en inglés, porque el <code>LookUp</code>
+            busca por <code>CropName</code> tal como viene del archivo.</p>
+        </div>
+
+        <h3>Comprobación rápida</h3>
+        <p class="mini">Agrega una etiqueta temporal en cualquier parte de la pantalla con este Text.
+          Si alguno sale en 0, ahí está el corte:</p>
+        <pre><code>"colVCRsp: " &amp; CountRows(colVCRsp) &amp; Char(10) &amp;
+"colVCR: " &amp; CountRows(colVCR) &amp; Char(10) &amp;
+"colInv: " &amp; CountRows(colInv) &amp; Char(10) &amp;
+"colCultivos: " &amp; CountRows(colCultivos) &amp; Char(10) &amp;
+"colCiclos: " &amp; CountRows(colCiclos) &amp; Char(10) &amp;
+"colAsign: " &amp; CountRows(colAsign)</code></pre>
+        <p class="mini">Con los datos bien cargados debe decir 186, 186, 33, 5, y después de
+          <b>Asignar automáticamente</b>, entre 55 y 75 ciclos con unas 200 asignaciones.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="tip" role="status" aria-live="polite"></div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-bd" data-close></div>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="modTit" data-ctl="conModal">
+    <div class="modal-hd" data-ctl="conModalHdr">
+      <div><h2 id="modTit"></h2><p class="hint" id="modSub"></p></div>
+      <button class="btn" data-close>Cerrar</button>
+    </div>
+    <div class="modal-in" id="modBody" data-ctl="conModalBody"></div>
+  </div>
+</div>
+
+<script id="datos" type="application/json">[[353926,"2026-Watermelon-Salama-SES,DRS,SRS-Parents-SLM","Watermelon","2025-11-01","2025-11-14",140,"Salama Station"],[353920,"2026-Watermelon-Salama-SES-P2-HMU-SLM-Spring-E","Watermelon","2025-11-01","2025-11-14",140,"Salama Station"],[284302,"Tomato-2026:04-Salama-FDR-SSD-F1>F2+MAS-24A8-F","Tomato","2025-12-11","2026-01-10",450,"Salama Station"],[279774,"Pepper-2025:10-Salama-JAL-SSD-F2>F3+MAS-25FD-A","Pepper","2025-12-12","2026-01-11",767,"Salama Station"],[343888,"2026 Protected Sweet Pepper GLS Sweet PEPPER S","Pepper","2025-12-15","2026-01-15",120,"Salama Station"],[320405,"2026 Protected GLS Sweet PEPPER Salama 2026:01","Pepper","2025-12-15","2026-01-15",800,"Salama Station"],[320397,"2026 Protected GLS Sweet PEPPER Salama 2026:01","Pepper","2025-12-15","2026-01-15",500,"Salama Station"],[320400,"2026 Protected GLS Sweet PEPPER Salama 2026:01","Pepper","2025-12-15","2026-01-15",500,"Salama Station"],[346748,"2026:01_Pepper_Salama_BLK-M-OPF_XD > F1_25-NOV","Pepper","2026-01-01","2026-01-15",54,"Salama Station"],[346747,"2026:01_Pepper_Salama_BLK-M-OPF_F1>BC1_25-BLK-","Pepper","2026-01-01","2026-01-15",26,"Salama Station"],[346744,"2026:01_Pepper_Salama_BLK-M-GRH_F1 >BC1_25-BLK","Pepper","2026-01-01","2026-02-01",6,"Salama Station"],[346749,"2026:01_Pepper_Salama__F4>F5_GEM_NAM","Pepper","2026-01-01","2026-01-15",3600,"Salama Station"],[352435,"2026:01_Pepper_Salama_ANC-M-Fresh-Cold to Hot_","Pepper","2026-01-01","2026-01-31",126,"Salama Station"],[352436,"2026:01_Pepper_Salama_JAL-M-Fresh-Cold to Hot_","Pepper","2026-01-01","2026-01-31",165,"Salama Station"],[342647,"2026_Watermelon_Salama_STR_Line_Adv_Spring","Watermelon","2026-01-02","2026-01-15",1500,"Salama Station"],[342647,"2026_Cucumber_Salama_BAP_HMU_Spring EG-2025:01","Cucumber","2026-01-07","2026-01-21",360,"Salama Station"],[342638,"2026_Cucumber _Salama_BAP_Line Development_Spr","Cucumber","2026-01-07","2026-01-21",240,"Salama Station"],[342638,"VTI 2026 Cucumber Cycle 1 ZY","Cucumber","2026-01-07","2026-01-22",132,"Salama Station"],[342638,"VTI 2026 Cucumber Cycle 1 NM","Cucumber","2026-01-07","2026-01-22",56,"Salama Station"],[351137,"VTI 2026 Cucumber Cycle 1 MK","Cucumber","2026-01-07","2026-01-22",510,"Salama Station"],[351135,"VTI 2026 Cucumber Cycle 1 NS","Cucumber","2026-01-07","2026-01-22",52,"Salama Station"],[351138,"VTI 2026 Cucumber Cycle 1 ST","Cucumber","2026-01-07","2026-01-22",264,"Salama Station"],[351064,"VTI 2026 Melon Cycle 1 NM","Melon","2026-01-07","2026-01-22",40,"Salama Station"],[351063,"VTI 2026 Melon Cycle 1 NS","Melon","2026-01-07","2026-01-22",120,"Salama Station"],[351066,"VTI 2026 Melon Cycle 1 ST","Melon","2026-01-07","2026-01-22",900,"Salama Station"],[351067,"VTI 2026 Melon Cycle 1 ZY","Melon","2026-01-07","2026-01-22",96,"Salama Station"],[351065,"VTI 2026 Melon Cycle 1 MK","Melon","2026-01-07","2026-01-22",1824,"Salama Station"],[279782,"Pepper-2025:10-Salama-ANC-SSD-F1>F2+PO-25FD-AH","Pepper","2026-01-09","2026-02-08",32,"Salama Station"],[279784,"Pepper-2025:10-Salama-JAL-SSD-F1>F2+PO-25FD-AH","Pepper","2026-01-09","2026-02-08",32,"Salama Station"],[353891,"2026-Melon-Salama-CAN-HMU-P2-Spring-DV","Melon","2026-01-10","2026-01-24",1200,"Salama Station"],[353892,"2026-Melon-Salama-CAN-HMU-P3-Spring-DV","Melon","2026-01-10","2026-01-24",800,"Salama Station"],[353890,"2026-Melon-Salama-CAN-HMU-P1-Spring-DV","Melon","2026-01-10","2026-01-24",2000,"Salama Station"],[353899,"2026-Melon-Woodland-CAN-HMU-SC1-GH705 Spring-D","Melon","2026-01-10","2026-01-24",2620,"Salama Station"],[353927,"2026-Watermelon-Salama-SES-Rapid cycle-Spring-","Watermelon","2026-01-10","2026-01-24",8000,"Salama Station"],[353943,"Tomato-2026:01-Salama-FIR-SSD-F2 >> F3-EMEA-GR","Tomato","2026-01-10","2026-02-14",1200,"Salama Station"],[351234,"Tomato-2026:01-Salama-FIR-SSD-F2 >> F3-MX-GRH","Tomato","2026-01-10","2026-02-14",300,"Salama Station"],[351231,"Tomato-2026:01-Salama-FIS-SSD-F3 >> F4-MX-GRH","Tomato","2026-01-10","2026-02-14",900,"Salama Station"],[351192,"Tomato-2026:01-Salama-FIR-SSD-F3 >> F4-CH-GRH-","Tomato","2026-01-10","2026-02-14",400,"Salama Station"],[351127,"Tomato-2026:01-Salama-FIS-SSD-F2 >> F3-MEX-GRH","Tomato","2026-01-10","2026-02-14",1740,"Salama Station"],[351190,"Tomato-2026:01-Salama-FIP-SSD-F3 >> F4-CH-GRH-","Tomato","2026-01-10","2026-02-14",1650,"Salama Station"],[351194,"Tomato-2026:01-Salama-FIR-SSD-F2 >> F3-CH-GRH-","Tomato","2026-01-10","2026-02-14",1760,"Salama Station"],[351237,"Tomato-2026:01-Salama-FIR-SSD-F3 >> F4-TR-GRH","Tomato","2026-01-10","2026-02-14",950,"Salama Station"],[351241,"Tomato-2026:01-Salama-FIR-SSD-F2 >> F3-MX-GRH","Tomato","2026-01-10","2026-02-14",1200,"Salama Station"],[351197,"Tomato-2026:01-Salama-FIR-SSD-F2 >> F3-CH-GRH-","Tomato","2026-01-10","2026-02-14",1740,"Salama Station"],[351132,"Tomato-2026:01-Salama-FIS-SSD-F3 >> F4-MEX-GRH","Tomato","2026-01-10","2026-02-14",868,"Salama Station"],[351182,"Tomato-2026:01-Salama-FIP-SSD-F4 >> F5| SC1 HM","Tomato","2026-01-10","2026-02-14",885,"Salama Station"],[351188,"Tomato-2026:01-Salama-FIR-SSD-F3 >> F4-TR-GRH-","Tomato","2026-01-10","2026-02-14",300,"Salama Station"],[351183,"Tomato-2026:01-Salama-FIR-SSD-F4 >> F5| SC1 HM","Tomato","2026-01-10","2026-02-14",1100,"Salama Station"],[343880,"2026 Protected Sweet Pepper Seedless Innovatio","Pepper","2026-01-10","2026-02-10",600,"Salama Station"],[343885,"2026 Protected Sweet Pepper Seedless Innovatio","Pepper","2026-01-10","2026-02-10",320,"Salama Station"],[343894,"2026 Protected Sweet Pepper Seedless Innovatio","Pepper","2026-01-10","2026-02-10",120,"Salama Station"],[343883,"2026 Protected Sweet Pepper Seedless Innovatio","Pepper","2026-01-10","2026-02-10",200,"Salama Station"],[355503,"Tomato 2026:01 Salama, GT CCT GLS F1 Self - SS","Tomato","2026-01-15","2026-02-14",110,"Salama Station"],[355311,"Tomato 2026:01 Salama, GT CCT GLS Self F1 - SS","Tomato","2026-01-15","2026-02-14",300,"Salama Station"],[355517,"Tomato 2026:01 Salama, GT CCT GHS F1 Self - 9U","Tomato","2026-01-15","2026-02-14",134,"Salama Station"],[348242,"2026:01_Pepper_Salama_BLK-M-OPF-Humid Cold to ","Pepper","2026-01-15","2026-02-15",100,"Salama Station"],[348246,"2026:01_Pepper_Salama_BLK-M-OPF-Ripe Harvest H","Pepper","2026-01-15","2026-02-15",416,"Salama Station"],[352316,"2026:01_Pepper_Salama_SFG-M-Fresh_P1 HMU_Nurse","Pepper","2026-01-15","2026-02-14",442,"Salama Station"],[348240,"2026:01_Pepper_Salama_HLG-M-OPF-Arid_PCM3 HMU_","Pepper","2026-01-15","2026-02-15",100,"Salama Station"],[352414,"2026:01_Pepper_Salama_JAL-M-Fresh-Hot To Cold_","Pepper","2026-01-15","2026-02-14",66,"Salama Station"],[352312,"2026:01_Pepper_Salama_SER-M-Fresh_S1 HMU_Nurse","Pepper","2026-01-15","2026-02-14",1188,"Salama Station"],[348247,"2026:01_Pepper_Salama_BLK-A-OPF-Hot to Cold_PC","Pepper","2026-01-15","2026-02-15",1984,"Salama Station"],[352315,"2026:01_Pepper_Salama_SER-M-Fresh_P2 HMU_Nurse","Pepper","2026-01-15","2026-02-14",77,"Salama Station"],[348241,"2026:01_Pepper_Salama_BLK-M-OPF-Concentrated H","Pepper","2026-01-15","2026-02-15",100,"Salama Station"],[352412,"2026:01_Pepper_Salama_JAL-M-Fresh-Hot To Cold_","Pepper","2026-01-15","2026-02-14",291,"Salama Station"],[352173,"2026:01_Pepper_Salama_ANC-M-Fresh_INC_Parent I","Pepper","2026-01-15","2026-02-14",100,"Salama Station"],[352313,"2026:01_Pepper_Salama_SFG-M-Fresh_S1 HMU_Nurse","Pepper","2026-01-15","2026-02-14",396,"Salama Station"],[352411,"2026:01_Pepper_Salama_ANC-M-Fresh-Hot Wet to C","Pepper","2026-01-15","2026-02-14",295,"Salama Station"],[352413,"2026:01_Pepper_Salama_ANC-M-Fresh-Hot Wet to C","Pepper","2026-01-15","2026-02-14",66,"Salama Station"],[352314,"2026:01_Pepper_Salama_SER-M-Fresh_P1 HMU_Nurse","Pepper","2026-01-15","2026-02-14",146,"Salama Station"],[348243,"2026:01_Pepper_Salama_BLK-M-OPF-Humid & Warm_P","Pepper","2026-01-15","2026-02-15",3928,"Salama Station"],[352317,"2026:01_Pepper_Salama_SFG-M-Fresh_P2 HMU_Nurse","Pepper","2026-01-15","2026-02-14",64,"Salama Station"],[348249,"2026:01_Pepper_Salama_BLK-M-OPF-Humid & Warm; ","Pepper","2026-01-15","2026-02-15",791,"Salama Station"],[351271,"Tomato-2026 Salama-FDS FIR FIS HMU_INC - Brazi","Tomato","2026-01-15","2026-02-13",300,"Salama Station"],[351268,"Tomato-2026 Salama-FDR HMU_INC - USA 01","Tomato","2026-01-15","2026-02-13",400,"Salama Station"],[355146,"2026:01_Cucumber_Salama, GT_POP-M-OPF_HMU_P1-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355147,"2026:01_Cucumber_Salama, GT_POP-M-OPF_HMU_P2-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355154,"2026:01_Cucumber_Salama, GT_PSP-M-OPF_HMU_SC1-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355163,"2026:01_Cucumber_Salama, GT_PSP-E-GRH_HMU_P3-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355156,"2026:01_Cucumber_Salama, GT_PSP-E-OPF_HMU_P1-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355151,"2026:01_Cucumber_Salama, GT_PSP-M-OPF_HMU_P1-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355158,"2026:01_Cucumber_Salama, GT_PSP-E-OPF_HMU_P3-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355141,"2026:01_Cucumber_Salama, GT_ASL-M-OPF_HMU_P1-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355161,"2026:01_Cucumber_Salama, GT_PSP-E-GRH_HMU_P1-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355162,"2026:01_Cucumber_Salama, GT_PSP-E-GRH_HMU_P2-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355142,"2026:01_Cucumber_Salama, GT_ASL-M-OPF_HMU_P2-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355157,"2026:01_Cucumber_Salama, GT_PSP-E-OPF_HMU_P2-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355148,"2026:01_Cucumber_Salama, GT_POP-M-OPF_HMU_P3-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355160,"2026:01_Cucumber_Salama, GT_PSP-E-OPF_HMU_SC2-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355140,"2026:01_Cucumber_Salama Rapid cycle Spring -EF","Cucumber","2026-01-17","2026-02-01",1600,"Salama Station"],[355152,"2026:01_Cucumber_Salama, GT_PSP-M-OPF_HMU_P2-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355165,"2026:01_Cucumber_Salama, GT_PSP-E-GRH_HMU_SC2-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355143,"2026:01_Cucumber_Salama, GT_ASL-M-OPF_HMU_P3-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355150,"2026:01_Cucumber_Salama, GT_POP-M-OPF_HMU_SC2-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355153,"2026:01_Cucumber_Salama, GT_PSP-M-OPF_HMU_P3-S","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355145,"2026:01_Cucumber_Salama, GT_ASL-M-OPF_HMU_SC2-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355149,"2026:01_Cucumber_Salama, GT_POP-M-OPF_HMU_SC1-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355144,"2026:01_Cucumber_Salama, GT_ASL-M-OPF_HMU_SC1-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355164,"2026:01_Cucumber_Salama, GT_PSP-E-GRH_HMU_SC1-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355159,"2026:01_Cucumber_Salama, GT_PSP-E-OPF_HMU_SC1-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[355155,"2026:01_Cucumber_Salama, GT_PSP-M-OPF_HMU_SC2-","Cucumber","2026-01-17","2026-02-01",240,"Salama Station"],[351229,"Tomato-2026:01-Salama-FIR-SSD-SSD-F3 >> F4-TR-","Tomato","2026-01-28","2026-03-04",580,"Salama Station"],[351227,"Tomato-2026:01-Salama-FIR-SSD-SSD-F3 >> F4-TR-","Tomato","2026-01-28","2026-03-04",1140,"Salama Station"],[351226,"Tomato-2026:01-Salama-FIR-SSD-F4 >> F5| SC1 HM","Tomato","2026-01-28","2026-03-04",573,"Salama Station"],[351225,"Tomato-2026:01-Salama-FIR-SSD-F4 >> F5| SC1 HM","Tomato","2026-01-28","2026-03-04",211,"Salama Station"],[352160,"2026:04_Tomato_Salama_FIR-LOOSE_SSD_F2-F3","Tomato","2026-02-01","2026-03-02",1050,"Salama Station"],[352166,"2026:04_Tomato_Salama_FIS-LOOSE_SSD_F2-F3","Tomato","2026-02-01","2026-03-02",175,"Salama Station"],[352163,"2026:04_Tomato_Salama_FIP-LOOSE_SSD_F2-F3","Tomato","2026-02-01","2026-03-02",525,"Salama Station"],[344355,"Tomato 2026:01 Salama, GT PMU F1 - SSD MAS","Tomato","2026-02-01","2026-02-28",200,"Salama Station"],[288011,"Tomato 2025:10 Salama, GT PMU F3 - SSD","Tomato","2026-02-10","2026-03-12",4600,"Salama Station"],[351248,"Tomato-2026:01-Salama-FIR-SSD-F1 >> F2-MX-GRH","Tomato","2026-02-15","2026-03-22",40,"Salama Station"],[351251,"Tomato-2026:01-Salama-FIR-SSD-F1 >> F2-CH-GRH","Tomato","2026-02-15","2026-03-22",120,"Salama Station"],[351264,"Tomato-2026:04-Salama-FIS-SSD-F1 >> F2-MX-GRH","Tomato","2026-02-15","2026-03-22",200,"Salama Station"],[351245,"Tomato-2026:01-Salama-FIR-SSD-F1 >> F2-MX-GRH","Tomato","2026-02-15","2026-03-22",80,"Salama Station"],[351170,"Tomato-2026:04-Salama-FIR-SSD-F2>>F3-269W-FIR-","Tomato","2026-02-20","2026-03-21",950,"Salama Station"],[351164,"Tomato-2026:04-Salama-FDS-SSD-F2>>F3-269W-FDS-","Tomato","2026-02-20","2026-03-21",950,"Salama Station"],[351167,"Tomato-2026:04-Salama-FIS-SSD-F2>>F3-269W-FIS-","Tomato","2026-02-20","2026-03-21",950,"Salama Station"],[351159,"Tomato-2026:04-Salama-FDS-SSD-F2>>F3-26XJ-FDS-","Tomato","2026-02-21","2026-03-22",950,"Salama Station"],[353111,"Pepper_Salama_GEMINI_NAM_Cages","Pepper","2026-03-01","2026-03-31",800,"Salama Station"],[343854,"2026 Fall Salama HMU PCM1 2026:07 SPE-M-OPF-Mi","Pepper","2026-03-01","2026-04-01",200,"Salama Station"],[348031,"VTI 2026 Pepper Cycle 1 MK","Pepper","2026-03-02","2026-03-30",4296,"Salama Station"],[348097,"VTI 2026 Pepper Cycle 1 ZY","Pepper","2026-03-02","2026-03-30",240,"Salama Station"],[347969,"VTI 2026 Pepper Cycle 1 NS","Pepper","2026-03-02","2026-03-30",340,"Salama Station"],[348062,"VTI 2026 Pepper Cycle 1 ST","Pepper","2026-03-02","2026-03-30",1496,"Salama Station"],[348026,"VTI 2026 Pepper Cycle 1 NM2","Pepper","2026-03-02","2026-03-30",464,"Salama Station"],[353504,"Tomato_2026:03_Salama_VTI _TBRFV-1","Tomato","2026-03-02","2026-03-31",800,"Salama Station"],[350274,"2026:01_Cucumber_Salama GU EUR Pre-COM HMU Y2-","Cucumber","2026-03-05","2026-03-25",540,"Salama Station"],[351200,"Tomato-2026:01-Salama-FIP-SSD-F1 >> F2-CH-GRH-","Tomato","2026-03-10","2026-04-14",102,"Salama Station"],[351206,"Tomato-2026:01-Salama-FIP-SSD-F1 >> F2-CH-GRH-","Tomato","2026-03-10","2026-04-14",135,"Salama Station"],[351203,"Tomato-2026:01-Salama-FIP-SSD-F1 >> F2-CH-GRH-","Tomato","2026-03-10","2026-04-14",102,"Salama Station"],[348886,"2026:01_Pepper_Salama_BLK-M-OPF-Humid & Warm_P","Pepper","2026-03-15","2026-04-15",5008,"Salama Station"],[348888,"2026:01_Pepper_Salama_HLG-M-OPF-Arid_PCM1 HMU_","Pepper","2026-03-15","2026-04-15",576,"Salama Station"],[348887,"2026:01_Pepper_Salama_BLK-M-OPF-Humid & Warm; ","Pepper","2026-03-15","2026-04-15",1870,"Salama Station"],[348884,"2026:01_Pepper_Salama_BLK-M-OPF-Concentrated H","Pepper","2026-03-15","2026-04-15",1376,"Salama Station"],[348885,"2026:01_Pepper_Salama_BLK-M-OPF-Humid Cold to ","Pepper","2026-03-15","2026-04-15",2464,"Salama Station"],[351272,"Tomato-2026 Salama-FDS FIR FIS HMU_INC - Brazi","Tomato","2026-03-15","2026-04-13",450,"Salama Station"],[351269,"Tomato-2026 Salama-FDR HMU_INC - USA 02","Tomato","2026-03-15","2026-04-13",250,"Salama Station"],[351426,"2026_Pepper-Salama-ALG_F1_TI","Pepper","2026-03-16","2026-04-16",320,"Salama Station"],[351239,"Tomato-2026:01-Salama-FIR-SSD-F3 >> F4-TR-GRH","Tomato","2026-03-22","2026-04-26",450,"Salama Station"],[350981,"VTI 2026 Tomato Cycle 1 NM","Tomato","2026-03-25","2026-04-10",480,"Salama Station"],[350997,"VTI 2026 Tomato TBRFV Cycle 1 NM","Tomato","2026-03-25","2026-04-10",320,"Salama Station"],[350982,"VTI 2026 Tomato Cycle 1 ST","Tomato","2026-03-25","2026-04-10",231,"Salama Station"],[350998,"VTI 2026 Tomato TBRFV Cycle 1 MK","Tomato","2026-01-21","2026-02-21",320,"Salama Station"],[350983,"VTI 2026 Tomato Cycle 1 MK","Tomato","2026-03-25","2026-04-10",1739,"Salama Station"],[350980,"VTI 2026 Tomato Cycle 1 NS","Tomato","2026-03-25","2026-04-10",520,"Salama Station"],[350984,"VTI 2026 Tomato Cycle 1 ZY","Tomato","2026-03-25","2026-04-10",615,"Salama Station"],[350996,"VTI 2026 Tomato TBRFV Cycle 1 NS","Tomato","2026-01-21","2026-02-21",320,"Salama Station"],[349865,"2026:10_Pepper_Salama_JAL-M-Fresh-Hot Wet to W","Pepper","2026-03-26","2026-04-25",278,"Salama Station"],[349864,"2026:04_Pepper_Salama_JAL-M-Fresh-Hot Wet to W","Pepper","2026-03-26","2026-04-25",278,"Salama Station"],[355501,"Tomato 2026:04 Salama, GT CCT GHS Self F2 MAS ","Tomato","2026-04-01","2026-04-30",2220,"Salama Station"],[355515,"Tomato 2026:04 Salama, GT CCT GHS Self F2 MAS ","Tomato","2026-04-01","2026-04-30",2760,"Salama Station"],[352169,"2026:04_Tomato_Salama_TRS_SSD_F3-F4","Tomato","2026-04-01","2026-04-30",570,"Salama Station"],[352113,"2026:04_Tomato_Salama_FIR-TRUSS_SSD_F3-F4","Tomato","2026-04-01","2026-04-30",1625,"Salama Station"],[351175,"Tomato-2026:04-Salama-FIS-SSD-DEVX-269W-FIS-02","Tomato","2026-04-05","2026-05-04",200,"Salama Station"],[351173,"Tomato-2026:04-Salama-FDS-SSD-DEVX-269W-FDS-02","Tomato","2026-04-05","2026-05-04",200,"Salama Station"],[351177,"Tomato-2026:04-Salama-FIR-SSD-DEVX-269W-FIR-02","Tomato","2026-04-05","2026-05-04",200,"Salama Station"],[355312,"Tomato 2026:04 Salama, GT CCT GLS F2 Self - SS","Tomato","2026-04-15","2026-05-14",1900,"Salama Station"],[349906,"2026:04_Pepper_Salama_JAL-M-Fresh-Hot to Cold_","Pepper","2026-04-16","2026-05-16",301,"Salama Station"],[349904,"2026:04_Pepper_Salama_SFG-M-Fresh_F2>F3+MAS_25","Pepper","2026-04-16","2026-05-15",200,"Salama Station"],[349905,"2026:04_Pepper_Salama_ANC-M-Fresh-Hot Wet to C","Pepper","2026-04-16","2026-05-16",306,"Salama Station"],[351275,"Tomato-2026 Salama-FSP Home Garden - USA 01","Tomato","2026-04-20","2026-05-19",150,"Salama Station"],[351145,"VTI 2026 Cucumber Cycle 2 ZY","Cucumber","2026-04-22","2026-05-20",84,"Salama Station"],[351142,"VTI 2026 Cucumber Cycle 2 NM","Cucumber","2026-04-22","2026-05-20",52,"Salama Station"],[351144,"VTI 2026 Cucumber Cycle 2 ST","Cucumber","2026-04-22","2026-05-20",324,"Salama Station"],[351141,"VTI 2026 Cucumber Cycle 2 NS","Cucumber","2026-04-22","2026-05-20",52,"Salama Station"],[351143,"VTI 2026 Cucumber Cycle 2 MK","Cucumber","2026-04-22","2026-05-20",442,"Salama Station"],[351069,"VTI 2026 Melon Cycle 2 NM","Melon","2026-04-22","2026-05-20",120,"Salama Station"],[351068,"VTI 2026 Melon Cycle 2 NS","Melon","2026-04-22","2026-05-20",120,"Salama Station"],[351070,"VTI 2026 Melon Cycle 2 MK","Melon","2026-04-22","2026-05-20",1522,"Salama Station"],[351073,"VTI 2026 Melon Cycle 2 ZY","Melon","2026-04-22","2026-05-20",126,"Salama Station"],[351072,"VTI 2026 Melon Cycle 2 ST","Melon","2026-04-22","2026-05-20",864,"Salama Station"],[349853,"2026:04_Pepper_Salama_SFG-M-Fresh_F6>F7_23FD-A","Pepper","2026-04-30","2026-05-30",300,"Salama Station"],[349863,"2026:04_Pepper_Salama_ANC-M-Fresh-Cold to Hot_","Pepper","2026-04-30","2026-05-30",400,"Salama Station"],[349851,"2026:04_Pepper_Salama_JAL-M-Fresh-Cold to Hot_","Pepper","2026-04-30","2026-05-30",500,"Salama Station"],[349852,"2026:04_Pepper_Salama_SER-M-Fresh_F6>F7_23FD-A","Pepper","2026-04-30","2026-05-30",370,"Salama Station"],[284299,"Tomato-2026:01-Salama-FDR-SSD-F4>F5_INC_26A8-F","Tomato","2026-04-30","2026-05-18",1100,"Salama Station"],[347839,"2026_Cucumber_Salama_BAP_Line Development_Summ","Cucumber","2026-05-04","2026-05-29",240,"Salama Station"],[347838,"2026_Cucumber _Salama_BAP_HMU Summer EG-2026:0","Cucumber","2026-05-04","2026-05-30",360,"Salama Station"],[351179,"Tomato-2026:04-Salama-FIR-SSD-F4>>F5_Thai mate","Tomato","2026-05-04","2026-06-02",850,"Salama Station"],[284303,"Tomato-2026:07-Salama-FDR-SSD-F2>F3+POMAS-24A8","Tomato","2026-05-05","2026-05-30",950,"Salama Station"],[351157,"Tomato-2026:04-Salama-FDR-SSD-DEVX-26A8-FDR-01","Tomato","2026-05-06","2026-06-04",200,"Salama Station"],[353895,"2026-Melon-Salama-CAN-HMU-P3-Summer-DV","Melon","2026-05-07","2026-05-21",800,"Salama Station"],[353893,"2026-Melon-Salama-CAN-HMU-P1-Summer-DV","Melon","2026-05-07","2026-05-21",2000,"Salama Station"],[353928,"2026-Watermelon-Salama-SES-Rapid cycle-Summer-","Watermelon","2026-05-07","2026-05-21",8000,"Salama Station"],[353894,"2026-Melon-Salama-CAN-HMU-P2-Summer-DV","Melon","2026-05-07","2026-05-21",1200,"Salama Station"],[350391,"2026:04_Pepper_Salama_JAL-M-Fresh-Cold-to-Hot_","Pepper","2026-05-08","2026-06-07",83,"Salama Station"]]</script>
+<script>
+/* ===================== PARÁMETROS ===================== */
+const CUL = {
+  Tomato:    {ES:"Tomate", Semillero:28, Ciclo:120, Ventana:7, Hex:"var(--Tomato)"},
+  Pepper:    {ES:"Chile",  Semillero:32, Ciclo:130, Ventana:7, Hex:"var(--Pepper)"},
+  Melon:     {ES:"Melón",  Semillero:18, Ciclo:90,  Ventana:7, Hex:"var(--Melon)"},
+  Watermelon:{ES:"Sandía", Semillero:20, Ciclo:100, Ventana:7, Hex:"var(--Watermelon)"},
+  Cucumber:  {ES:"Pepino", Semillero:16, Ciclo:95,  Ventana:7, Hex:"var(--Cucumber)"}
+};
+const CUC = ";Melon;Watermelon;Cucumber;", SOL = ";Tomato;Pepper;", TOM = ";Tomato;";
+const INV_SEED = [
+ ["INV 1","INV 1-8 · Cucurbitáceas","Directa",CUC,1120,1.8,2020],["INV 2","INV 1-8 · Cucurbitáceas","Directa",CUC,1120,1.8,2020],
+ ["INV 3","INV 1-8 · Cucurbitáceas","Directa",CUC,980,1.8,1760],["INV 4","INV 1-8 · Cucurbitáceas","Directa",CUC,980,1.8,1760],
+ ["INV 5","INV 1-8 · Cucurbitáceas","Directa",CUC,1400,1.8,2520],["INV 6","INV 1-8 · Cucurbitáceas","Directa",CUC,1400,1.8,2520],
+ ["INV 7","INV 1-8 · Cucurbitáceas","Directa",CUC,1260,1.8,2270],["INV 8","INV 1-8 · Cucurbitáceas","Directa",CUC,1260,1.8,2270],
+ ["INV 9","INV 9-19 · Tomate y Chile","Trasplante",SOL,1400,2.8,3920],["INV 10","INV 9-19 · Tomate y Chile","Trasplante",SOL,1400,2.8,3920],
+ ["INV 11","INV 9-19 · Tomate y Chile","Trasplante",SOL,1400,2.8,3920],["INV 12","INV 9-19 · Tomate y Chile","Trasplante",SOL,1260,2.8,3530],
+ ["INV 13","INV 9-19 · Tomate y Chile","Trasplante",SOL,1260,2.8,3530],["INV 14","INV 9-19 · Tomate y Chile","Trasplante",SOL,1540,2.8,4310],
+ ["INV 15","INV 9-19 · Tomate y Chile","Trasplante",SOL,1540,2.8,4310],["INV 16","INV 9-19 · Tomate y Chile","Trasplante",SOL,1400,2.8,3920],
+ ["INV 17","INV 9-19 · Tomate y Chile","Trasplante",SOL,1400,2.8,3920],["INV 18","INV 9-19 · Tomate y Chile","Trasplante",SOL,1120,2.8,3140],
+ ["INV 19","INV 9-19 · Tomate y Chile","Trasplante",SOL,1120,2.8,3140],
+ ["INV 20","INV 20-24 · Cucurbitáceas","Trasplante",CUC,900,1.8,1620],["INV 21","INV 20-24 · Cucurbitáceas","Trasplante",CUC,900,1.8,1620],
+ ["INV 22","INV 20-24 · Cucurbitáceas","Trasplante",CUC,1040,1.8,1870],["INV 23","INV 20-24 · Cucurbitáceas","Trasplante",CUC,1040,1.8,1870],
+ ["INV 24","INV 20-24 · Cucurbitáceas","Trasplante",CUC,760,1.8,1370],
+ ["P4","P4 / P8 / P10 · Tomate","Trasplante",TOM,2100,2.8,5880],["P8","P4 / P8 / P10 · Tomate","Trasplante",TOM,2100,2.8,5880],
+ ["P10","P4 / P8 / P10 · Tomate","Trasplante",TOM,1820,2.8,5100],
+ ["N3","N3-N8 · Cucurbitáceas","Trasplante",CUC,640,1.8,1150],["N4","N3-N8 · Cucurbitáceas","Trasplante",CUC,640,1.8,1150],
+ ["N5","N3-N8 · Cucurbitáceas","Trasplante",CUC,720,1.8,1300],["N6","N3-N8 · Cucurbitáceas","Trasplante",CUC,720,1.8,1300],
+ ["N7","N3-N8 · Cucurbitáceas","Trasplante",CUC,560,1.8,1010],["N8","N3-N8 · Cucurbitáceas","Trasplante",CUC,560,1.8,1010]
+];
+const DISP = {"INV 3":"2026-01-20","INV 10":"2026-02-05","P8":"2026-01-15","N5":"2026-02-20"};
+
+const D=86400000, SEM=56;
+const INI = new Date("2025-11-01T00:00:00");
+const FIN = new Date(INI.getTime()+(SEM*7-1)*D);
+const d  = s => new Date(s+"T00:00:00");
+const add= (f,n)=> new Date(f.getTime()+n*D);
+const fmt= f => f.toLocaleDateString("es-GT",{day:"2-digit",month:"short"});
+const nf = n => Math.round(n).toLocaleString("es-GT");
+const sem= f => Math.floor((f-INI)/D/7)+1;
+
+const S = {ventana:7, grupo:10, sobre:5, inv:[], vcr:[], ciclos:[], asign:[], invSel:null, loteVer:null,
+           fBloque:"", fCultivo:""};
+
+function init(){
+  S.inv = INV_SEED.map((r,i)=>({cod:r[0],bloque:r[1],tipo:r[2],cultivos:r[3],area:r[4],dens:r[5],
+                                cap:r[6],disp:d(DISP[r[0]]||"2025-11-01"),orden:i}));
+  const raw = JSON.parse(document.getElementById("datos").textContent);
+  S.vcr = raw.map(r=>{
+    const c = CUL[r[2]];
+    return {id:r[0], nombre:r[1], cultivo:r[2], es:c.ES, hex:c.Hex,
+            early:d(r[3]), last:d(r[4]), plantas:r[5], sitio:r[6],
+            semillero:c.Semillero, ciclo:c.Ciclo, ventana:c.Ventana,
+            tEarly:add(d(r[3]),c.Semillero), tLast:add(d(r[4]),c.Semillero), gid:0};
+  });
+}
+
+/* ===================== MOTOR (igual que el Power Fx) ===================== */
+function planificar(){
+  S.ciclos=[]; S.asign=[];
+  const libre={}; S.inv.forEach(g=> libre[g.cod]=g.disp.getTime());
+  const pend = S.vcr.map(v=>({v, rest:v.plantas}));
+  const tol = S.grupo*D;
+  const lead = (g,v)=> g.tipo==="Directa" ? 0 : v.semillero;
+
+  for(let pasada=0; pasada<6; pasada++){
+    pend.sort((a,b)=> a.v.tLast-b.v.tLast || b.rest-a.rest);
+    for(const p of pend){
+      if(p.rest<=0) continue;
+      const v=p.v;
+      // A. ¿lote abierto compatible?
+      let T = S.ciclos.filter(c=> c.cultivo===v.cultivo && c.plantas<c.cap
+                && c.ini.getTime() >= v.tEarly.getTime()-tol
+                && c.ini.getTime() <= v.tLast.getTime()+tol)
+              .sort((a,b)=> a.ini-b.ini)[0];
+      // B. abrir lote nuevo
+      if(!T){
+        const cands = S.inv.filter(g=> g.cultivos.includes(";"+v.cultivo+";"))
+          .map(g=>({g, ini: Math.max(libre[g.cod], add(v.early, lead(g,v)).getTime())}))
+          .sort((a,b)=> a.ini-b.ini || b.g.cap-a.g.cap);
+        const best = cands[0];
+        if(!best || best.ini > FIN.getTime()) continue;
+        const ini = new Date(best.ini), fin = add(ini, v.ciclo);
+        T = {lote:"L"+String(S.ciclos.length+1).padStart(3,"0"), inv:best.g.cod, tipo:best.g.tipo,
+             cultivo:v.cultivo, es:v.es, hex:v.hex, ini, fin, libre:add(fin, v.ventana),
+             cap:best.g.cap, plantas:0, origen:"Auto"};
+        S.ciclos.push(T);
+      }
+      const hueco = T.cap - T.plantas;
+      const n = p.rest <= hueco + T.cap*S.sobre/100 ? p.rest : hueco;
+      if(n<=0) continue;
+      S.asign.push({lote:T.lote, vcr:v.id, nombre:v.nombre, cultivo:v.cultivo, es:v.es, hex:v.hex,
+        inv:T.inv, plantas:n,
+        siembra: add(T.ini, -(T.tipo==="Directa"?0:v.semillero)),
+        trasplante:T.ini, fin:T.fin,
+        estado: T.ini > (T.tipo==="Directa"? v.last : v.tLast) ? "Atrasado" : "Programado",
+        origen:"Auto"});
+      T.plantas += n;
+      libre[T.inv] = T.libre.getTime();
+      p.rest -= n;
+    }
+  }
+  pend.filter(p=>p.rest>0).forEach(p=> S.asign.push({lote:"", vcr:p.v.id, nombre:p.v.nombre,
+    cultivo:p.v.cultivo, es:p.v.es, hex:p.v.hex, inv:"—", plantas:p.rest,
+    siembra:p.v.early, trasplante:null, fin:null, estado:"Sin cupo", origen:"Auto"}));
+  agrupar();
+  pintar();
+}
+
+function agrupar(){
+  const orden=[...S.vcr].sort((a,b)=> a.cultivo.localeCompare(b.cultivo) || a.early-b.early);
+  let gn=0, crop="", lastMin=INI;
+  orden.forEach(v=>{
+    if(v.cultivo!==crop || v.early > add(lastMin,S.grupo)){ gn++; crop=v.cultivo; lastMin=v.last; }
+    else if(v.last<lastMin) lastMin=v.last;
+    v.gid=gn;
+  });
+  const gs={};
+  S.vcr.forEach(v=>{
+    const g = gs[v.gid] || (gs[v.gid]={gid:v.gid, cultivo:v.cultivo, es:v.es, hex:v.hex,
+      ini:v.early, fin:v.last, comun:v.last, n:0, plantas:0});
+    g.n++; g.plantas+=v.plantas;
+    if(v.early<g.ini) g.ini=v.early;
+    if(v.last>g.fin) g.fin=v.last;
+    if(v.last<g.comun) g.comun=v.last;
+  });
+  S.grupos=Object.values(gs).sort((a,b)=> a.cultivo.localeCompare(b.cultivo)||a.ini-b.ini);
+}
+
+/* ===================== MÉTRICAS ===================== */
+function met(){
+  const pedido=S.vcr.reduce((s,v)=>s+v.plantas,0);
+  const sin=S.asign.filter(a=>a.estado==="Sin cupo").reduce((s,a)=>s+a.plantas,0);
+  const col=S.asign.filter(a=>a.estado!=="Sin cupo").reduce((s,a)=>s+a.plantas,0);
+  const atras=new Set(S.asign.filter(a=>a.estado==="Atrasado").map(a=>a.vcr)).size;
+  const capTot=S.inv.reduce((s,g)=>s+g.cap,0);
+  const pw=S.ciclos.reduce((s,c)=> s + c.plantas*((c.fin-c.ini)/D/7), 0);
+  const casas={}; S.asign.filter(a=>a.estado!=="Sin cupo").forEach(a=>{
+    (casas[a.vcr]=casas[a.vcr]||new Set()).add(a.inv); });
+  const part=Object.values(casas).filter(s=>s.size>1).length;
+  return {pedido,sin,col,atras,capTot,part,util: capTot? pw/(capTot*SEM)*100 : 0, ciclos:S.ciclos.length};
+}
+function ocup(){
+  const w=Array.from({length:SEM},()=>0);
+  S.ciclos.forEach(c=>{
+    const a=Math.max(1,sem(c.ini)), b=Math.min(SEM,sem(c.fin));
+    for(let i=a;i<=b;i++) if(i>=1&&i<=SEM) w[i-1]+=c.plantas;
+  });
+  return w;
+}
+
+/* ===================== RENDER ===================== */
+function pintar(){ kpis(); timeline(); tablaInv(); tablaVcr(); tablaAsg(); tablaCul(); }
+
+function kpis(){
+  const m=met(), pct=m.pedido? m.col/m.pedido*100 : 0;
+  const t=[
+    ["Plantas solicitadas", nf(m.pedido), S.vcr.length+" VCR activos",""],
+    ["Con cupo asignado", nf(m.col), Math.round(pct)+"% de la demanda", pct>=99.5?"ok":""],
+    ["Sin cupo", nf(m.sin), m.sin? "Requiere casa adicional":"Toda la demanda entra", m.sin?"mal":"ok"],
+    ["Ciclos programados", nf(m.ciclos), m.part+" VCR partidos entre casas",""],
+    ["Utilización", Math.round(m.util)+"%", "sobre "+nf(m.capTot)+" pl instaladas",""],
+    ["Fuera de ventana", nf(m.atras), "trasplante después del Latest Start", m.atras?"mal":"ok"]
+  ];
+  document.getElementById("kpis").innerHTML=t.map(x=>
+    `<div class="kpi ${x[3]}"><div class="lab">${x[0]}</div><div class="val">${x[1]}</div><div class="sub">${x[2]}</div></div>`).join("");
+}
+
+const pct = f => Math.max(0, Math.min(100, (f-INI)/D/(SEM*7)*100));
+
+function timeline(){
+  const meses=["NOV","DIC","ENE","FEB","MAR","ABR","MAY","JUN","JUL","AGO","SEP","OCT","NOV","DIC"];
+  let mh="";
+  for(let i=0;i<14;i++){
+    const a=new Date(2025,10+i,1), b=new Date(2025,11+i,1);
+    if(a>FIN) break;
+    mh+=`<i style="left:${pct(a)}%;width:${Math.max(0,pct(b)-pct(a))}%">${meses[i]}</i>`;
+  }
+  let wh=""; for(let i=1;i<=SEM;i+=4) wh+=`<i style="left:${(i-0.5)/SEM*100}%">S${i}</i>`;
+  let h=`<div class="row ruler" data-ctl="conRegla"><div class="lbl"><span class="cod">Invernadero</span><span class="cap">cap. pl</span></div>
+    <div class="track" style="background:none"><div class="months">${mh}</div><div class="weeks">${wh}</div></div></div>`;
+
+  const bloques=[...new Set(S.inv.map(g=>g.bloque))].filter(b=> !S.fBloque || b===S.fBloque);
+  bloques.forEach(b=>{
+    const casas=S.inv.filter(g=>g.bloque===b);
+    h+=`<div class="row grp"><div class="lbl">${b.split(" · ")[0]}</div><div class="track">
+      <span style="font-size:10px;color:var(--ink-2);padding-left:6px;line-height:19px">
+      ${b.split(" · ")[1]} · ${casas.length} casas · ${nf(casas.reduce((s,g)=>s+g.cap,0))} plantas</span></div></div>`;
+    casas.forEach(g=>{
+      const cic=S.ciclos.filter(c=>c.inv===g.cod && (!S.fCultivo || c.cultivo===S.fCultivo));
+      let bars="";
+      const dp=pct(g.disp);
+      if(dp>0) bars+=`<div class="blq" style="left:0;width:${dp}%" data-prod="${fmt(g.disp)}"></div>`;
+      cic.forEach(c=>{
+        const a=pct(c.ini), b2=pct(c.fin), v=pct(c.libre);
+        const semi=pct(add(c.ini, -(c.tipo==="Directa"?0:CUL[c.cultivo].Semillero)));
+        const fill=Math.round(c.plantas/c.cap*100);
+        if(semi<a) bars+=`<div class="seg-semi" style="left:${semi}%;width:${a-semi}%;color:${c.hex}"></div>`;
+        bars+=`<div class="seg-vent" style="left:${b2}%;width:${Math.max(v-b2,.2)}%"></div>`;
+        bars+=`<div class="bar" data-lote="${c.lote}" style="left:${a}%;width:${Math.max(b2-a,1)}%;background:${c.hex}">${c.es} ${fill}%</div>`;
+      });
+      h+=`<div class="row gh" data-ctl="conFila"><div class="lbl"><span class="cod">${g.cod}</span><span class="cap">${nf(g.cap)}</span></div>
+        <div class="track">${bars}</div></div>`;
+    });
+  });
+
+  const w=ocup(), capTot=S.inv.filter(g=>!S.fBloque||g.bloque===S.fBloque).reduce((s,g)=>s+g.cap,0);
+  const max=Math.max(capTot, ...w)||1;
+  let bars="";
+  w.forEach((x,i)=> bars+=`<div class="wk" data-wk="${i+1}" data-pl="${x}"><i style="height:${x/max*112}px"></i></div>`);
+  const lines=[100,75,50,25].map(p=>`<div class="gline" style="bottom:${p/100*112}px"><b>${p===100?nf(capTot)+" pl":p+"%"}</b></div>`).join("");
+  h+=`<div class="row chartrow" data-ctl="conOcup"><div class="lbl"><span class="cod">Plantas en casa</span>
+    <span class="cap">capacidad ${nf(capTot)} pl</span></div><div class="chart">${lines}${bars}</div></div>`;
+  document.getElementById("tl").innerHTML=h;
+
+  document.getElementById("leyenda").innerHTML =
+    Object.entries(CUL).map(([k,v])=>`<span><i class="dot" style="background:${v.Hex}"></i>${v.ES} · ${v.Ciclo} d</span>`).join("")
+    + `<span><i class="dot vent"></i>Ventana</span><span><i class="dot prod"></i>En producción</span>`;
+}
+
+function tablaInv(){
+  const t=document.getElementById("tInv");
+  t.innerHTML=`<thead><tr><th>Invernadero</th><th>Bloque</th><th>Tipo</th><th>Cultivos</th>
+    <th class="n">Área m²</th><th class="n">Dens.</th><th class="n">Capacidad</th><th>Disponible</th>
+    <th class="n">Ciclos</th><th>Uso del año</th></tr></thead><tbody>`+
+    S.inv.map(g=>{
+      const c=S.ciclos.filter(x=>x.inv===g.cod);
+      const u=Math.min(100,Math.round(c.reduce((s,x)=>s+(x.fin-x.ini)/D/7,0)/SEM*100));
+      return `<tr><td><b>${g.cod}</b></td><td class="hint">${g.bloque.split(" · ")[0]}</td><td>${g.tipo}</td>
+        <td class="hint">${g.cultivos.slice(1,-1).split(";").map(x=>CUL[x].ES).join(", ")}</td>
+        <td class="n">${nf(g.area)}</td><td class="n">${g.dens.toString().replace(".",",")}</td>
+        <td class="n">${nf(g.cap)}</td><td class="n">${fmt(g.disp)}</td><td class="n">${c.length}</td>
+        <td><div class="meter" title="${u}%"><i style="width:${u}%"></i></div></td></tr>`;
+    }).join("")+`</tbody>`;
+  document.getElementById("capTot").textContent=nf(S.inv.reduce((s,g)=>s+g.cap,0))+" plantas · "+S.inv.length+" casas";
+}
+
+function tablaVcr(){
+  const usado={}; S.asign.forEach(a=>{ if(a.estado!=="Sin cupo") usado[a.vcr]=(usado[a.vcr]||0)+a.plantas; });
+  document.getElementById("tVcr").innerHTML=
+    `<thead><tr><th>VCRID</th><th>VCR Name</th><th>Crop</th><th class="n">Earliest</th><th class="n">Latest</th>
+     <th class="n">Plants</th><th class="n">Ventana trasplante</th><th class="n">Asignado</th><th>Estado</th><th>Casas</th></tr></thead><tbody>`+
+    S.vcr.slice().sort((a,b)=>a.tLast-b.tLast).map(v=>{
+      const a=usado[v.id]||0;
+      const casas=[...new Set(S.asign.filter(x=>x.vcr===v.id && x.estado!=="Sin cupo").map(x=>x.inv))];
+      const late=S.asign.some(x=>x.vcr===v.id && x.estado==="Atrasado");
+      const est = a===0? `<span class="pill bad">Sin cupo</span>`
+        : a<v.plantas? `<span class="pill late">Parcial ${Math.round(a/v.plantas*100)}%</span>`
+        : late? `<span class="pill late">Atrasado</span>` : `<span class="pill ok">Completo</span>`;
+      return `<tr><td><b>${v.id}</b></td><td class="hint" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v.nombre}</td>
+        <td><i class="dot" style="background:${v.hex}"></i> ${v.es}</td>
+        <td class="n">${fmt(v.early)}</td><td class="n">${fmt(v.last)}</td><td class="n">${nf(v.plantas)}</td>
+        <td class="n hint">${fmt(v.tEarly)} – ${fmt(v.tLast)}</td><td class="n">${nf(a)}</td>
+        <td>${est}</td><td class="hint">${casas.join(", ")||"—"}</td></tr>`;
+    }).join("")+`</tbody>`;
+
+  document.getElementById("grupos").innerHTML=(S.grupos||[]).map(g=>
+    `<div class="chip"><i class="dot" style="background:${g.hex}"></i>
+     <span class="gt"><b>${g.es} · ${fmt(g.ini)} – ${fmt(g.fin)}</b>
+     <span>${g.n} VCR · ${nf(g.plantas)} pl · siembra común hasta ${fmt(g.comun)}</span></span></div>`).join("");
+}
+
+function tablaAsg(){
+  document.getElementById("tRes").innerHTML=
+    `<thead><tr><th>Invernadero</th><th class="n">Capacidad</th><th class="n">Ciclos</th><th>Cultivos</th>
+     <th class="n">Plantas·ciclo</th><th class="n">Sem. ocupadas</th><th>Uso</th></tr></thead><tbody>`+
+    S.inv.map(g=>{
+      const c=S.ciclos.filter(x=>x.inv===g.cod);
+      const so=Math.round(c.reduce((s,x)=>s+(x.fin-x.ini)/D/7,0));
+      return `<tr><td><b>${g.cod}</b></td><td class="n">${nf(g.cap)}</td><td class="n">${c.length}</td>
+        <td class="hint">${[...new Set(c.map(x=>x.es))].join(", ")||"—"}</td>
+        <td class="n">${nf(c.reduce((s,x)=>s+x.plantas,0))}</td><td class="n">${so}</td>
+        <td><div class="meter"><i style="width:${Math.min(100,so/SEM*100)}%"></i></div></td></tr>`;
+    }).join("")+`</tbody>`;
+
+  document.getElementById("tAsg").innerHTML=
+    `<thead><tr><th>Lote</th><th>VCRID</th><th>Cultivo</th><th>Invernadero</th><th class="n">Plantas</th>
+     <th class="n">Semillero</th><th class="n">Trasplante</th><th class="n">Sem</th><th class="n">Fin ciclo</th><th>Estado</th></tr></thead><tbody>`+
+    [...S.asign].sort((a,b)=> (a.trasplante&&b.trasplante? a.trasplante-b.trasplante : 0) || a.inv.localeCompare(b.inv))
+    .map(a=>{
+      const cls = a.estado==="Sin cupo"?"bad":a.estado==="Atrasado"?"late":"ok";
+      return `<tr><td class="hint">${a.lote||"—"}</td><td><b>${a.vcr}</b></td>
+        <td><i class="dot" style="background:${a.hex}"></i> ${a.es}</td><td>${a.inv}</td>
+        <td class="n">${nf(a.plantas)}</td><td class="n">${fmt(a.siembra)}</td>
+        <td class="n">${a.trasplante?fmt(a.trasplante):"—"}</td><td class="n">${a.trasplante?"S"+sem(a.trasplante):"—"}</td>
+        <td class="n">${a.fin?fmt(a.fin):"—"}</td><td><span class="pill ${cls}">${a.estado}</span></td></tr>`;
+    }).join("")+`</tbody>`;
+}
+
+function tablaCul(){
+  document.getElementById("tCul").innerHTML=
+    `<thead><tr><th>Cultivo (CropName)</th><th>Muestra</th><th class="n">Semillero</th><th class="n">Invernadero</th>
+     <th class="n">Ventana</th><th class="n">Ciclo total</th><th class="n">Ciclos/año</th><th class="n">VCR</th><th class="n">Plantas</th></tr></thead><tbody>`+
+    Object.entries(CUL).map(([k,v])=>{
+      const tot=v.Ciclo+S.ventana, vs=S.vcr.filter(x=>x.cultivo===k);
+      return `<tr><td><i class="dot" style="background:${v.Hex}"></i> <b>${k}</b></td><td class="hint">${v.ES}</td>
+        <td class="n">${v.Semillero}</td><td class="n">${v.Ciclo}</td><td class="n">${S.ventana}</td>
+        <td class="n"><b>${tot}</b></td><td class="n"><b>${(365/tot).toFixed(2)}</b></td>
+        <td class="n">${vs.length}</td><td class="n">${nf(vs.reduce((s,x)=>s+x.plantas,0))}</td></tr>`;
+    }).join("")+`</tbody>`;
+}
+
+/* ===================== POPUP Y TOOLTIP ===================== */
+const tip=document.getElementById("tip");
+function showTip(html,x,y){
+  tip.innerHTML=html; tip.style.opacity=1;
+  const r=tip.getBoundingClientRect();
+  tip.style.left=Math.min(x+14, innerWidth-r.width-10)+"px";
+  tip.style.top=Math.max(8, y-r.height-12)+"px";
+}
+const hideTip=()=> tip.style.opacity=0;
+
+document.getElementById("tl").addEventListener("mousemove", e=>{
+  const el=e.target.closest(".bar,.blq,.wk");
+  if(!el) return hideTip();
+  if(el.classList.contains("blq"))
+    return showTip(`<h4>Casa en producción</h4><div class="kv">disponible ${el.dataset.prod}</div>`, e.clientX,e.clientY);
+  if(el.classList.contains("wk")){
+    const cap=S.inv.filter(g=>!S.fBloque||g.bloque===S.fBloque).reduce((s,g)=>s+g.cap,0);
+    return showTip(`<h4>Semana ${el.dataset.wk}</h4>
+      <div class="kv"><span>Plantas en casa</span><b>${nf(+el.dataset.pl)}</b></div>
+      <div class="kv"><span>Ocupación</span><b>${Math.round(el.dataset.pl/cap*100)}%</b></div>`, e.clientX,e.clientY);
+  }
+  const c=S.ciclos.find(x=>x.lote===el.dataset.lote); if(!c) return;
+  const it=S.asign.filter(a=>a.lote===c.lote);
+  showTip(`<h4>${c.inv} · ${c.es}</h4>
+    <div class="kv"><span>Trasplante</span><b>${fmt(c.ini)} (S${sem(c.ini)})</b></div>
+    <div class="kv"><span>Fin de cosecha</span><b>${fmt(c.fin)} (S${sem(c.fin)})</b></div>
+    <div class="kv"><span>Casa libre</span><b>${fmt(c.libre)}</b></div>
+    <div class="kv"><span>Ocupación</span><b>${nf(c.plantas)} / ${nf(c.cap)} (${Math.round(c.plantas/c.cap*100)}%)</b></div>
+    <div style="margin-top:5px;border-top:1px solid var(--line);padding-top:5px">
+    ${it.map(a=>`<div class="kv"><span>${a.vcr}</span><b>${nf(a.plantas)}</b></div>`).join("")}</div>`, e.clientX,e.clientY);
+});
+document.getElementById("tl").addEventListener("mouseleave", hideTip);
+document.getElementById("tl").addEventListener("click", e=>{
+  const b=e.target.closest(".bar"); if(!b) return;
+  const c=S.ciclos.find(x=>x.lote===b.dataset.lote); if(!c) return;
+  hideTip(); S.invSel=c.inv; S.loteVer=c.lote; abrirModal();
+});
+function abrirModal(){
+  const g=S.inv.find(x=>x.cod===S.invSel);
+  const cic=S.ciclos.filter(c=>c.inv===g.cod).sort((a,b)=>a.ini-b.ini);
+  const so=Math.round(cic.reduce((s,c)=>s+(c.fin-c.ini)/D/7,0));
+  document.getElementById("modTit").textContent=g.cod+" · "+g.bloque.split(" · ")[0];
+  document.getElementById("modSub").innerHTML=
+    `${g.tipo} · ${g.cultivos.slice(1,-1).split(";").map(x=>CUL[x].ES).join(" / ")} · capacidad <b>${nf(g.cap)}</b> pl
+     · disponible desde ${fmt(g.disp)} · ${cic.length} ciclos · ${so} de ${SEM} semanas ocupadas`;
+  document.getElementById("modBody").innerHTML = cic.length? cic.map(c=>{
+    const it=S.asign.filter(a=>a.lote===c.lote), fill=Math.round(c.plantas/c.cap*100);
+    return `<div class="lote${S.loteVer===c.lote?" act":""}" data-ctl="galLotes">
+      <div class="lote-hd"><span class="t"><i class="dot" style="background:${c.hex}"></i>${c.es} · ${c.lote}
+        <span class="pill">${c.origen}</span></span></div>
+      <div class="hint" style="margin-bottom:6px">Trasplante <b>${fmt(c.ini)}</b> (S${sem(c.ini)}) →
+        fin <b>${fmt(c.fin)}</b> (S${sem(c.fin)}) → casa libre <b>${fmt(c.libre)}</b> ·
+        <b>${nf(c.plantas)} / ${nf(c.cap)} pl (${fill}%)</b></div>
+      <div class="meter" style="margin-bottom:7px"><i style="width:${Math.min(100,fill)}%"></i></div>
+      <table data-ctl="galVCRLote"><thead><tr><th>VCRID</th><th>VCR Name</th><th class="n">Plantas</th>
+        <th class="n">% lote</th><th class="n">Semillero</th><th>Estado</th></tr></thead><tbody>
+        ${it.map(a=>{
+          const v=S.vcr.find(x=>x.id===a.vcr);
+          return `<tr><td><b>${a.vcr}</b>${v&&a.plantas<v.plantas?` <span class="hint">de ${nf(v.plantas)}</span>`:""}</td>
+            <td class="hint" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${a.nombre}</td>
+            <td class="n">${nf(a.plantas)}</td><td class="n">${Math.round(a.plantas/c.cap*100)}%</td>
+            <td class="n hint">${fmt(a.siembra)}</td>
+            <td><span class="pill ${a.estado==="Atrasado"?"late":"ok"}">${a.estado}</span></td></tr>`;
+        }).join("")}</tbody></table></div>`;
+  }).join("") : `<p class="hint">Esta casa no tiene ciclos asignados.</p>`;
+  document.getElementById("modal").hidden=false;
+}
+document.getElementById("modal").addEventListener("click", e=>{
+  if(e.target.dataset.close!==undefined){ document.getElementById("modal").hidden=true; S.invSel=null; }
+});
+document.addEventListener("keydown", e=>{ if(e.key==="Escape") document.getElementById("modal").hidden=true; });
+
+/* ===================== EVENTOS ===================== */
+document.querySelectorAll(".tab").forEach(b=> b.addEventListener("click", ()=>{
+  document.querySelectorAll(".tab").forEach(x=> x.setAttribute("aria-selected", x===b));
+  ["TL","INV","VCR","ASG","PAR","FLU"].forEach(k=> document.getElementById("tab-"+k).hidden = (k!==b.dataset.t));
+}));
+document.getElementById("btnFlujo").addEventListener("click", ()=>{
+  document.querySelector('.tab[data-t="FLU"]').click();
+  document.querySelector('.tab[data-t="FLU"]').scrollIntoView({block:"nearest"});
+});
+document.getElementById("swCtl").addEventListener("change", e=> document.body.classList.toggle("ctl", e.target.checked));
+document.getElementById("btnAuto").addEventListener("click", planificar);
+document.getElementById("btnLimpiar").addEventListener("click", ()=>{ S.ciclos=[]; S.asign=[]; pintar(); });
+document.getElementById("pVent").addEventListener("change", e=>{
+  S.ventana=+e.target.value||0; Object.values(CUL).forEach(c=>c.Ventana=S.ventana);
+  S.vcr.forEach(v=> v.ventana=S.ventana); planificar();
+});
+document.getElementById("pGrp").addEventListener("change", e=>{ S.grupo=+e.target.value||0; planificar(); });
+document.getElementById("pSob").addEventListener("change", e=>{ S.sobre=+e.target.value||0; planificar(); });
+document.getElementById("fBloque").addEventListener("change", e=>{ S.fBloque=e.target.value; timeline(); });
+document.getElementById("fCultivo").addEventListener("change", e=>{ S.fCultivo=e.target.value; timeline(); });
+
+/* ===================== ARRANQUE ===================== */
+init();
+document.getElementById("fBloque").innerHTML=`<option value="">Todos los bloques</option>`+
+  [...new Set(S.inv.map(g=>g.bloque))].map(b=>`<option value="${b}">${b.split(" · ")[0]}</option>`).join("");
+document.getElementById("fCultivo").innerHTML=`<option value="">Todos</option>`+
+  Object.entries(CUL).map(([k,v])=>`<option value="${k}">${v.ES}</option>`).join("");
+planificar();
+</script>
