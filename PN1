@@ -1,0 +1,439 @@
+PLANIFICADOR DE INVERNADEROS - CORRECCIONES POWER APPS
+Generado: 2026-09-29
+Sintaxis: es-GT  (separador ;   encadenado ;;   decimal ,)
+
+CONTENIDO
+   1. Las cuatro causas de los 112 errores
+   2. Listas de SharePoint: columna y tipo de dato
+   3. Anadir al final de App.OnStart
+   4. btnAuto . OnSelect  (motor reescrito)
+   5. btnAgrupar . OnSelect
+   6. btnAsignarManual . OnSelect
+   7. drpMover . OnChange
+   8. Los 8 combobox
+   9. El resto de formulas
+  10. Propiedades de diseno pendientes, control por control
+  11. Orden de aplicacion y verificacion
+
+==============================================================================
+  1. LAS CUATRO CAUSAS DE LOS 112 ERRORES
+==============================================================================
+
+CAUSA 1  "Esta funcion no puede invocarse en ForAll"           ~45 errores
+  Power Fx no permite Set, Clear, ClearCollect ni UpdateContext dentro de
+  ForAll. Solo Collect, Patch y Remove. El motor guardaba el resto por
+  asignar en varRest dentro del bucle.
+  SOLUCION: el estado vive en colPend.Rest y se actualiza con Patch.
+
+CAUSA 2  "No se reconoce FechaTrasplante / Directa" y tipos     ~25 errores
+  Las colecciones arrancan vacias y sin esquema, asi que sus columnas no
+  existen en tiempo de diseno. Las variables de texto con Blank() no se
+  pueden comparar contra texto.
+  SOLUCION: sembrar el esquema en OnStart (ClearCollect + Clear) e
+  inicializar las variables de texto con "".
+
+CAUSA 3  "ComboBoxSampleTable / Se esperaba un valor Table"     ~25 errores
+  Las formulas unian dos tablas con &, que concatena TEXTO, no tablas.
+  Y el combobox moderno necesita ItemDisplayText; sin eso conserva Value1
+  de la tabla de ejemplo y falla en cadena, incluido Selected.
+  SOLUCION: armar las listas en OnStart con Collect y apuntar Items a la
+  coleccion, mas ItemDisplayText en cada combobox.
+
+CAUSA 4  "No se reconoce PLN_Ciclos / PLN_Cultivos"             ~17 errores
+  Esas listas de SharePoint no estan conectadas como origen de datos.
+  SOLUCION: crearlas con la seccion 2 y agregarlas en Agregar datos, o
+  quitar los Patch hacia ellas mientras tanto.
+
+==============================================================================
+  2. LISTAS DE SHAREPOINT: COLUMNA Y TIPO DE DATO
+==============================================================================
+
+Title es la columna que SharePoint crea sola en cada lista; solo hay que
+llenarla. Las demas se agregan con Agregar columna.
+
+------------------------------------------------------------------------------
+  PLN_Cultivos
+------------------------------------------------------------------------------
+
+  Parametros por cultivo. 5 filas, una por cultivo.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  Cultivo               Una linea de texto
+  CultivoES             Una linea de texto
+  Familia               Una linea de texto
+  DiasSemillero         Numero
+  DiasCiclo             Numero
+  DiasVentana           Numero
+  ColorHex              Una linea de texto
+
+------------------------------------------------------------------------------
+  PLN_Invernaderos
+------------------------------------------------------------------------------
+
+  Catalogo de casas. 33 filas.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  Codigo                Una linea de texto
+  Bloque                Una linea de texto
+  Tipo                  Eleccion  (Directa / Trasplante)
+  CultivosPermitidos    Una linea de texto
+  AreaM2                Numero
+  DensidadPlM2          Numero
+  CapacidadPlantas      Numero
+  DisponibleDesde       Fecha y hora  (solo fecha)
+  Activo                Si/No
+  Orden                 Numero
+
+------------------------------------------------------------------------------
+  PLN_VCR
+------------------------------------------------------------------------------
+
+  Solicitudes importadas del Excel. Una fila por VCR.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  VCRID                 Numero
+  VCRName               Una linea de texto
+  CropName              Una linea de texto
+  SiteName              Una linea de texto
+  EarliestStartDate     Fecha y hora  (solo fecha)
+  LatestStartDate       Fecha y hora  (solo fecha)
+  VCRPlants             Numero
+  Estado                Una linea de texto
+  Anio                  Numero
+
+------------------------------------------------------------------------------
+  PLN_Ciclos
+------------------------------------------------------------------------------
+
+  Un lote por casa y fecha. Lo escribe la app.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  Invernadero           Una linea de texto
+  Cultivo               Una linea de texto
+  FechaTrasplante       Fecha y hora  (solo fecha)
+  FechaFinCiclo         Fecha y hora  (solo fecha)
+  FechaLibre            Fecha y hora  (solo fecha)
+  PlantasLote           Numero
+  CapacidadLote         Numero
+  Origen                Eleccion  (Auto / Manual)
+  Anio                  Numero
+
+------------------------------------------------------------------------------
+  PLN_Asignacion
+------------------------------------------------------------------------------
+
+  Un VCR dentro de un lote. Lo escribe la app.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  LoteId                Una linea de texto
+  VCRID                 Numero
+  VCRName               Una linea de texto
+  Invernadero           Una linea de texto
+  Cultivo               Una linea de texto
+  Plantas               Numero
+  FechaSiembra          Fecha y hora  (solo fecha)
+  FechaTrasplante       Fecha y hora  (solo fecha)
+  FechaFin              Fecha y hora  (solo fecha)
+  SemanaIni             Numero
+  SemanaFin             Numero
+  Estado                Eleccion  (Programado / Atrasado / Sin cupo)
+  Origen                Eleccion  (Auto / Manual)
+  Anio                  Numero
+
+COLUMNAS INDEXADAS  (Configuracion de la lista > Columnas indexadas)
+  PLN_VCR              VCRID, CropName, SiteName, Anio
+  PLN_Ciclos           Invernadero, Anio
+  PLN_Asignacion       VCRID, Invernadero, Anio
+
+Sin estos indices, los Filter contra SharePoint dejan de ser delegables
+y la app solo lee las primeras 2000 filas.
+
+==============================================================================
+  3. ANADIR AL FINAL DE App.OnStart
+==============================================================================
+
+No reemplaza nada. Se pega al final de lo que ya tienes.
+
+Set(varInvSel; "");;
+Set(varLoteVer; "");;
+Set(varFBloque; "");;
+Set(varFCultivo; "");;
+Set(varFCultivoVCR; "");;
+Set(varGBase; "vent");;
+
+ClearCollect(colCiclos;
+{Lote:"";Inv:"";Tipo:"";Cultivo:"";ES:"";FechaTrasplante:varIniPlan;FechaFin:varIniPlan;
+FechaLibre:varIniPlan;Cap:0;Plantas:0;Origen:"";Hex:""});;
+Clear(colCiclos);;
+
+ClearCollect(colAsign;
+{Lote:"";VCRID:0;Nombre:"";Cultivo:"";ES:"";Inv:"";Plantas:0;Siembra:varIniPlan;
+Trasplante:varIniPlan;Fin:varIniPlan;Estado:"";Origen:"";Hex:""});;
+Clear(colAsign);;
+
+ClearCollect(colPend;
+{VCRID:0;Nombre:"";Cultivo:"";ES:"";Early:varIniPlan;Last:varIniPlan;TEarly:varIniPlan;
+TLast:varIniPlan;Semillero:0;Ciclo:0;Ventana:0;Hex:"";Rest:0});;
+Clear(colPend);;
+
+ClearCollect(colLibre; {Cod:"";Libre:varIniPlan});;
+Clear(colLibre);;
+
+ClearCollect(colGrupos;
+{Gid:0;Cultivo:"";ES:"";Hex:"";Ini:varIniPlan;Fin:varIniPlan;Comun:varIniPlan;VCRs:0;Plantas:0});;
+Clear(colGrupos);;
+
+ClearCollect(colSel; {VCRID:0});;
+Clear(colSel);;
+
+ClearCollect(colOcup; {Sem:0;Ini:varIniPlan;Plantas:0;Casas:0});;
+Clear(colOcup);;
+
+ClearCollect(colKPI; {Orden:0;Lab:"";Val:"";Sub:"";Alerta:""});;
+Clear(colKPI);;
+
+ClearCollect(colOpcBloque; {Bloque:"";Nom:"Todos los bloques"});;
+Collect(colOpcBloque; ForAll(Distinct(colInv; Bloque) As B; {Bloque:B.Value; Nom:B.Value}));;
+
+ClearCollect(colOpcCultivo; {Cultivo:"";Nom:"Todos"});;
+Collect(colOpcCultivo; ForAll(colCultivos As C; {Cultivo:C.Cultivo; Nom:C.ES}));;
+
+ClearCollect(colOpcCriterio;
+{Modo:"vent";Nom:"Ventana compartida"};
+{Modo:"early";Nom:"Misma fecha de inicio"});;
+
+ClearCollect(colOpcSitio; {Sitio:"Salama Station"}; {Sitio:"Guatemala-EXT"});;
+
+==============================================================================
+  4. btnAuto . OnSelect   (reemplazar todo)
+==============================================================================
+
+Clear(colCiclos);;
+Clear(colAsign);;
+ClearCollect(colLibre; ForAll(colInv As G; {Cod: G.Cod; Libre: G.Disp}));;
+ClearCollect(colPend;
+    ForAll(colVCR As V;
+        {VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+         Early: V.Early; Last: V.Last; TEarly: V.TEarly; TLast: V.TLast;
+         Semillero: V.Semillero; Ciclo: V.Ciclo; Ventana: V.Ventana;
+         Hex: V.Hex; Rest: V.Plantas}));;
+
+ForAll(Sequence(6) As Pasada;
+    ForAll(SortByColumns(colPend; "TLast"; SortOrder.Ascending) As V;
+
+        Collect(colCiclos;
+            With({R: LookUp(colPend; VCRID = V.VCRID).Rest;
+                  NJ: CountRows(Filter(colCiclos;
+                        Cultivo = V.Cultivo && Plantas < Cap
+                        && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                        && FechaTrasplante <= DateAdd(V.TLast; varAgrupar; TimeUnit.Days)));
+                  C: First(SortByColumns(SortByColumns(
+                        ForAll(Filter(colInv; Find(";" & V.Cultivo & ";"; Cultivos) > 0) As G;
+                            {Cod: G.Cod; Cap: G.Cap; Tipo: G.Tipo;
+                             Ini: If(LookUp(colLibre; Cod = G.Cod).Libre >
+                                     DateAdd(V.Early; If(G.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days);
+                                     LookUp(colLibre; Cod = G.Cod).Libre;
+                                     DateAdd(V.Early; If(G.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days))});
+                        "Cap"; SortOrder.Descending); "Ini"; SortOrder.Ascending))};
+                If(R > 0 && NJ = 0 && C.Cod <> "" && C.Ini <= varFinPlan;
+                    Table({Lote: "L" & Text(CountRows(colCiclos) + 1; "[$-en-US]000");
+                           Inv: C.Cod; Tipo: C.Tipo; Cultivo: V.Cultivo; ES: V.ES;
+                           FechaTrasplante: C.Ini;
+                           FechaFin: DateAdd(C.Ini; V.Ciclo; TimeUnit.Days);
+                           FechaLibre: DateAdd(C.Ini; V.Ciclo + V.Ventana; TimeUnit.Days);
+                           Cap: C.Cap; Plantas: 0; Origen: "Auto"; Hex: V.Hex});
+                    Filter(colCiclos; false))));;
+
+        Collect(colAsign;
+            With({R: LookUp(colPend; VCRID = V.VCRID).Rest;
+                  T: If(CountRows(Filter(colCiclos; Plantas = 0)) > 0;
+                        First(Filter(colCiclos; Plantas = 0));
+                        First(SortByColumns(Filter(colCiclos;
+                            Cultivo = V.Cultivo && Plantas < Cap
+                            && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                            && FechaTrasplante <= DateAdd(V.TLast; varAgrupar; TimeUnit.Days));
+                            "FechaTrasplante"; SortOrder.Ascending)))};
+                If(R > 0 && T.Lote <> "";
+                    Table({Lote: T.Lote; VCRID: V.VCRID; Nombre: V.Nombre;
+                           Cultivo: V.Cultivo; ES: V.ES; Inv: T.Inv;
+                           Plantas: If(R <= (T.Cap - T.Plantas) + T.Cap * varSobre / 100;
+                                       R; T.Cap - T.Plantas);
+                           Siembra: DateAdd(T.FechaTrasplante;
+                                    -If(T.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days);
+                           Trasplante: T.FechaTrasplante;
+                           Fin: T.FechaFin;
+                           Estado: If(T.FechaTrasplante >
+                                      If(T.Tipo = "Directa"; V.Last; V.TLast);
+                                      "Atrasado"; "Programado");
+                           Origen: "Auto"; Hex: V.Hex});
+                    Filter(colAsign; false))));;
+
+        ForAll(Filter(colCiclos; Plantas = 0) As Z;
+            Patch(colCiclos; LookUp(colCiclos; Lote = Z.Lote);
+                {Plantas: Sum(Filter(colAsign; Lote = Z.Lote); Plantas)}));;
+
+        ForAll(Filter(colCiclos; Lote = Last(colAsign).Lote) As Z;
+            Patch(colCiclos; LookUp(colCiclos; Lote = Z.Lote);
+                {Plantas: Sum(Filter(colAsign; Lote = Z.Lote); Plantas)}));;
+
+        ForAll(Filter(colLibre; Cod = Last(colAsign).Inv) As L;
+            Patch(colLibre; LookUp(colLibre; Cod = L.Cod);
+                {Libre: LookUp(colCiclos; Lote = Last(colAsign).Lote).FechaLibre}));;
+
+        Patch(colPend; LookUp(colPend; VCRID = V.VCRID);
+            {Rest: LookUp(colVCR; VCRID = V.VCRID).Plantas
+                   - Sum(Filter(colAsign; VCRID = V.VCRID); Plantas)})
+    )
+);;
+
+ForAll(Filter(colPend; Rest > 0) As V;
+    Collect(colAsign;
+        {Lote: ""; VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+         Inv: "-"; Plantas: V.Rest; Siembra: V.Early; Trasplante: V.Early; Fin: V.Early;
+         Estado: "Sin cupo"; Origen: "Auto"; Hex: V.Hex}));;
+
+Select(btnKPI);;
+Set(varMsg; "Plan generado: " & CountRows(colCiclos) & " ciclos");;
+
+==============================================================================
+  5. btnAgrupar . OnSelect   (reemplazar todo)
+==============================================================================
+
+ClearCollect(colGEst; {GN: 0; Crop: ""; LastMin: varIniPlan});;
+ClearCollect(colOrdG;
+    If(varGBase = "early";
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending);
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending)));;
+
+ForAll(colOrdG As V;
+    Patch(colGEst; First(colGEst);
+        {GN: If(V.Cultivo <> First(colGEst).Crop
+                || V.Early > DateAdd(First(colGEst).LastMin; varProx; TimeUnit.Days);
+                First(colGEst).GN + 1; First(colGEst).GN);
+         Crop: V.Cultivo;
+         LastMin: If(V.Cultivo <> First(colGEst).Crop
+                     || V.Early > DateAdd(First(colGEst).LastMin; varProx; TimeUnit.Days);
+                     V.Last;
+                     If(V.Last < First(colGEst).LastMin; V.Last; First(colGEst).LastMin))});;
+    Patch(colVCR; LookUp(colVCR; VCRID = V.VCRID); {Gid: First(colGEst).GN}));;
+
+ClearCollect(colGrupos;
+    ForAll(Distinct(colVCR; Gid) As G;
+        With({it: Filter(colVCR; Gid = G.Value)};
+            {Gid: G.Value;
+             Cultivo: First(it).Cultivo;
+             ES: First(it).ES;
+             Hex: First(it).Hex;
+             Ini: First(SortByColumns(it; "Early"; SortOrder.Ascending)).Early;
+             Fin: First(SortByColumns(it; "Last"; SortOrder.Descending)).Last;
+             Comun: First(SortByColumns(it; "Last"; SortOrder.Ascending)).Last;
+             VCRs: CountRows(it);
+             Plantas: Sum(it; Plantas)})));;
+
+==============================================================================
+  6. btnAsignarManual . OnSelect   (reemplazar todo)
+==============================================================================
+
+ClearCollect(colSelV; ForAll(colSel As S; LookUp(colVCR; VCRID = S.VCRID)));;
+Set(varGh; LookUp(colInv; Cod = drpInvManual.Selected.Cod));;
+Set(varT; dtpFechaManual.SelectedDate);;
+
+If(CountRows(colSelV) = 0;
+    Set(varMsg; "Selecciona al menos un VCR");
+ CountRows(Distinct(colSelV; Cultivo)) > 1;
+    Set(varMsg; "El lote debe ser de un solo cultivo");
+ Find(";" & First(colSelV).Cultivo & ";"; varGh.Cultivos) = 0;
+    Set(varMsg; varGh.Cod & " no admite " & First(colSelV).ES);
+ IsBlank(varT);
+    Set(varMsg; "Indica la fecha de trasplante");
+ varT < LookUp(colLibre; Cod = varGh.Cod).Libre;
+    Set(varMsg; varGh.Cod & " esta ocupado hasta el "
+        & Text(LookUp(colLibre; Cod = varGh.Cod).Libre; "[$-es-GT]dd/mm/yyyy"));
+
+    Collect(colCiclos;
+        {Lote: "M" & Text(CountRows(colCiclos) + 1; "[$-en-US]000");
+         Inv: varGh.Cod; Tipo: varGh.Tipo;
+         Cultivo: First(colSelV).Cultivo; ES: First(colSelV).ES;
+         FechaTrasplante: varT;
+         FechaFin: DateAdd(varT; First(colSelV).Ciclo; TimeUnit.Days);
+         FechaLibre: DateAdd(varT; First(colSelV).Ciclo + First(colSelV).Ventana; TimeUnit.Days);
+         Cap: varGh.Cap; Plantas: 0; Origen: "Manual"; Hex: First(colSelV).Hex})
+);;
+
+Set(varLoteM; Last(colCiclos).Lote);;
+
+ForAll(SortByColumns(colSelV; "TLast"; SortOrder.Ascending) As V;
+    Collect(colAsign;
+        With({L: LookUp(colCiclos; Lote = varLoteM);
+              usado: Sum(Filter(colAsign; Lote = varLoteM); Plantas);
+              rest: V.Plantas - Sum(Filter(colAsign; VCRID = V.VCRID && Estado <> "Sin cupo"); Plantas)};
+            If(L.Origen = "Manual" && rest > 0 && usado < L.Cap;
+                Table({Lote: L.Lote; VCRID: V.VCRID; Nombre: V.Nombre;
+                       Cultivo: V.Cultivo; ES: V.ES; Inv: L.Inv;
+                       Plantas: If(rest <= L.Cap - usado + L.Cap * varSobre / 100;
+                                   rest; L.Cap - usado);
+                       Siembra: DateAdd(L.FechaTrasplante;
+                                -If(L.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days);
+                       Trasplante: L.FechaTrasplante; Fin: L.FechaFin;
+                       Estado: If(L.FechaTrasplante > If(L.Tipo = "Directa"; V.Last; V.TLast);
+                                  "Atrasado"; "Programado");
+                       Origen: "Manual"; Hex: V.Hex});
+                Filter(colAsign; false)))));;
+
+Patch(colCiclos; LookUp(colCiclos; Lote = varLoteM);
+    {Plantas: Sum(Filter(colAsign; Lote = varLoteM); Plantas)});;
+Patch(colLibre; LookUp(colLibre; Cod = varGh.Cod);
+    {Libre: LookUp(colCiclos; Lote = varLoteM).FechaLibre});;
+Clear(colSel);;
+Select(btnKPI);;
+Set(varMsg; "Lote " & varLoteM & " creado en " & varGh.Cod & ": "
+    & Text(LookUp(colCiclos; Lote = varLoteM).Plantas; "[$-es-GT]#,##0") & " plantas");;
+
+==============================================================================
+  7. drpMover . OnChange   (reemplazar todo)
+==============================================================================
+
+Set(varMvLote; ThisItem.Lote);;
+Set(varMvVcrId; ThisItem.VCRID);;
+Set(varMvN; ThisItem.Plantas);;
+Set(varMvDest; Self.Selected.Cod);;
+Set(varMvV; LookUp(colVCR; VCRID = varMvVcrId));;
+Set(varMvG; LookUp(colInv; Cod = varMvDest));;
+
+ClearCollect(colBkCiclos; colCiclos);;
+ClearCollect(colBkAsign; colAsign);;
+ClearCollect(colBkLibre; colLibre);;
+
+Patch(colCiclos; LookUp(colCiclos; Lote = varMvLote);
+    {Plantas: LookUp(colCiclos; Lote = varMvLote).Plantas - varMvN});;
+RemoveIf(colAsign; Lote = varMvLote && VCRID = varMvVcrId);;
+RemoveIf(colCiclos; Lote = varMvLote && Plantas <= 0);;
+
+Set(varMvJoin;
+    First(SortByColumns(Filter(colCiclos;
+        Inv = varMvDest && Cultivo = varMvV.Cultivo && Plantas < Cap
+        && FechaTrasplante >= DateAdd(varMvV.TEarly; -varAgrupar; TimeUnit.Days)
+        && FechaTrasplante <= DateAdd(varMvV.TLast; varAgrupar; TimeUnit.Days));
+        "FechaTrasplante"; SortOrder.Ascending)));;
+
+Set(varMvIni;
+    If(LookUp(colLibre; Cod = varMvDest).Libre >
+       DateAdd(varMvV.Early; If(varMvG.Tipo = "Directa"; 0; varMvV.Semillero); TimeUnit.Days);
+       LookUp(colLibre; Cod = varMvDest).Libre;
+       DateAdd(varMvV.Early; If(varMvG.Tipo = "Directa"; 0; varMvV.Semillero); TimeUnit.Days)));;
+
+If(varMvJoin.Lote = "" && varMvIni <= varFinPlan;
+    Collect(colCiclos;
+        {Lote: "M" & Text(CountRows(colCiclos) + 1; "[$
