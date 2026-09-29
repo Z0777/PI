@@ -1,0 +1,1573 @@
+PLANIFICADOR DE INVERNADEROS - CORRECCIONES POWER APPS
+Generado: 2026-09-29
+Sintaxis: es-GT  (separador ;   encadenado ;;   decimal ,)
+
+CONTENIDO
+   1. Las cuatro causas de los 112 errores
+   2. Listas de SharePoint: columna y tipo de dato
+   3. Anadir al final de App.OnStart
+   4. btnAuto . OnSelect  (motor reescrito)
+   5. btnAgrupar . OnSelect
+   6. btnAsignarManual . OnSelect
+   7. drpMover . OnChange
+   8. Los 8 combobox
+   9. El resto de formulas
+  10. Pendientes finales: division entre cero, idioma y leyenda
+  11. Propiedades de diseno pendientes, control por control
+  12. Orden de aplicacion y verificacion
+
+==============================================================================
+  1. LAS CUATRO CAUSAS DE LOS 112 ERRORES
+==============================================================================
+
+CAUSA 1  "Esta funcion no puede invocarse en ForAll"           ~45 errores
+  Power Fx no permite Set, Clear, ClearCollect ni UpdateContext dentro de
+  ForAll. Solo Collect, Patch y Remove. El motor guardaba el resto por
+  asignar en varRest dentro del bucle.
+  SOLUCION: el estado vive en colPend.Rest y se actualiza con Patch.
+
+CAUSA 2  "No se reconoce FechaTrasplante / Directa" y tipos     ~25 errores
+  Las colecciones arrancan vacias y sin esquema, asi que sus columnas no
+  existen en tiempo de diseno. Las variables de texto con Blank() no se
+  pueden comparar contra texto.
+  SOLUCION: sembrar el esquema en OnStart (ClearCollect + Clear) e
+  inicializar las variables de texto con "".
+
+CAUSA 3  "ComboBoxSampleTable / Se esperaba un valor Table"     ~25 errores
+  Las formulas unian dos tablas con &, que concatena TEXTO, no tablas.
+  Y el combobox moderno necesita ItemDisplayText; sin eso conserva Value1
+  de la tabla de ejemplo y falla en cadena, incluido Selected.
+  SOLUCION: armar las listas en OnStart con Collect y apuntar Items a la
+  coleccion, mas ItemDisplayText en cada combobox.
+
+CAUSA 4  "No se reconoce PLN_Ciclos / PLN_Cultivos"             ~17 errores
+  Esas listas de SharePoint no estan conectadas como origen de datos.
+  SOLUCION: crearlas con la seccion 2 y agregarlas en Agregar datos, o
+  quitar los Patch hacia ellas mientras tanto.
+
+==============================================================================
+  2. LISTAS DE SHAREPOINT: COLUMNA Y TIPO DE DATO
+==============================================================================
+
+Title es la columna que SharePoint crea sola en cada lista; solo hay que
+llenarla. Las demas se agregan con Agregar columna.
+
+------------------------------------------------------------------------------
+  PLN_Cultivos
+------------------------------------------------------------------------------
+
+  Parametros por cultivo. 5 filas, una por cultivo.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  Cultivo               Una linea de texto
+  CultivoES             Una linea de texto
+  Familia               Una linea de texto
+  DiasSemillero         Numero
+  DiasCiclo             Numero
+  DiasVentana           Numero
+  ColorHex              Una linea de texto
+
+------------------------------------------------------------------------------
+  PLN_Invernaderos
+------------------------------------------------------------------------------
+
+  Catalogo de casas. 33 filas.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  Codigo                Una linea de texto
+  Bloque                Una linea de texto
+  Tipo                  Eleccion  (Directa / Trasplante)
+  CultivosPermitidos    Una linea de texto
+  AreaM2                Numero
+  DensidadPlM2          Numero
+  CapacidadPlantas      Numero
+  DisponibleDesde       Fecha y hora  (solo fecha)
+  Activo                Si/No
+  Orden                 Numero
+
+------------------------------------------------------------------------------
+  PLN_VCR
+------------------------------------------------------------------------------
+
+  Solicitudes importadas del Excel. Una fila por VCR.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  VCRID                 Numero
+  VCRName               Una linea de texto
+  CropName              Una linea de texto
+  SiteName              Una linea de texto
+  EarliestStartDate     Fecha y hora  (solo fecha)
+  LatestStartDate       Fecha y hora  (solo fecha)
+  VCRPlants             Numero
+  Estado                Una linea de texto
+  Anio                  Numero
+
+------------------------------------------------------------------------------
+  PLN_Ciclos
+------------------------------------------------------------------------------
+
+  Un lote por casa y fecha. Lo escribe la app.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  Invernadero           Una linea de texto
+  Cultivo               Una linea de texto
+  FechaTrasplante       Fecha y hora  (solo fecha)
+  FechaFinCiclo         Fecha y hora  (solo fecha)
+  FechaLibre            Fecha y hora  (solo fecha)
+  PlantasLote           Numero
+  CapacidadLote         Numero
+  Origen                Eleccion  (Auto / Manual)
+  Anio                  Numero
+
+------------------------------------------------------------------------------
+  PLN_Asignacion
+------------------------------------------------------------------------------
+
+  Un VCR dentro de un lote. Lo escribe la app.
+
+  COLUMNA               TIPO DE DATO
+  --------------------------------------------------------------------
+  Title                 Una linea de texto
+  LoteId                Una linea de texto
+  VCRID                 Numero
+  VCRName               Una linea de texto
+  Invernadero           Una linea de texto
+  Cultivo               Una linea de texto
+  Plantas               Numero
+  FechaSiembra          Fecha y hora  (solo fecha)
+  FechaTrasplante       Fecha y hora  (solo fecha)
+  FechaFin              Fecha y hora  (solo fecha)
+  SemanaIni             Numero
+  SemanaFin             Numero
+  Estado                Eleccion  (Programado / Atrasado / Sin cupo)
+  Origen                Eleccion  (Auto / Manual)
+  Anio                  Numero
+
+COLUMNAS INDEXADAS  (Configuracion de la lista > Columnas indexadas)
+  PLN_VCR              VCRID, CropName, SiteName, Anio
+  PLN_Ciclos           Invernadero, Anio
+  PLN_Asignacion       VCRID, Invernadero, Anio
+
+Sin estos indices, los Filter contra SharePoint dejan de ser delegables
+y la app solo lee las primeras 2000 filas.
+
+==============================================================================
+  3. ANADIR AL FINAL DE App.OnStart
+==============================================================================
+
+No reemplaza nada. Se pega al final de lo que ya tienes.
+
+Set(varInvSel; "");;
+Set(varLoteVer; "");;
+Set(varFBloque; "");;
+Set(varFCultivo; "");;
+Set(varFCultivoVCR; "");;
+Set(varGBase; "vent");;
+
+ClearCollect(colCiclos;
+{Lote:"";Inv:"";Tipo:"";Cultivo:"";ES:"";FechaTrasplante:varIniPlan;FechaFin:varIniPlan;
+FechaLibre:varIniPlan;Cap:0;Plantas:0;Origen:"";Hex:""});;
+Clear(colCiclos);;
+
+ClearCollect(colAsign;
+{Lote:"";VCRID:0;Nombre:"";Cultivo:"";ES:"";Inv:"";Plantas:0;Siembra:varIniPlan;
+Trasplante:varIniPlan;Fin:varIniPlan;Estado:"";Origen:"";Hex:""});;
+Clear(colAsign);;
+
+ClearCollect(colPend;
+{VCRID:0;Nombre:"";Cultivo:"";ES:"";Early:varIniPlan;Last:varIniPlan;TEarly:varIniPlan;
+TLast:varIniPlan;Semillero:0;Ciclo:0;Ventana:0;Hex:"";Rest:0});;
+Clear(colPend);;
+
+ClearCollect(colLibre; {Cod:"";Libre:varIniPlan});;
+Clear(colLibre);;
+
+ClearCollect(colGrupos;
+{Gid:0;Cultivo:"";ES:"";Hex:"";Ini:varIniPlan;Fin:varIniPlan;Comun:varIniPlan;VCRs:0;Plantas:0});;
+Clear(colGrupos);;
+
+ClearCollect(colSel; {VCRID:0});;
+Clear(colSel);;
+
+ClearCollect(colOcup; {Sem:0;Ini:varIniPlan;Plantas:0;Casas:0});;
+Clear(colOcup);;
+
+ClearCollect(colKPI; {Orden:0;Lab:"";Val:"";Sub:"";Alerta:""});;
+Clear(colKPI);;
+
+ClearCollect(colOpcBloque; {Bloque:"";Nom:"Todos los bloques"});;
+Collect(colOpcBloque; ForAll(Distinct(colInv; Bloque) As B; {Bloque:B.Value; Nom:B.Value}));;
+
+ClearCollect(colOpcCultivo; {Cultivo:"";Nom:"Todos"});;
+Collect(colOpcCultivo; ForAll(colCultivos As C; {Cultivo:C.Cultivo; Nom:C.ES}));;
+
+ClearCollect(colOpcCriterio;
+{Modo:"vent";Nom:"Ventana compartida"};
+{Modo:"early";Nom:"Misma fecha de inicio"});;
+
+ClearCollect(colOpcSitio; {Sitio:"Salama Station"}; {Sitio:"Guatemala-EXT"});;
+
+==============================================================================
+  4. btnAuto . OnSelect   (reemplazar todo)
+==============================================================================
+
+Clear(colCiclos);;
+Clear(colAsign);;
+ClearCollect(colLibre; ForAll(colInv As G; {Cod: G.Cod; Libre: G.Disp}));;
+ClearCollect(colPend;
+    ForAll(colVCR As V;
+        {VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+         Early: V.Early; Last: V.Last; TEarly: V.TEarly; TLast: V.TLast;
+         Semillero: V.Semillero; Ciclo: V.Ciclo; Ventana: V.Ventana;
+         Hex: V.Hex; Rest: V.Plantas}));;
+
+ForAll(Sequence(6) As Pasada;
+    ForAll(SortByColumns(colPend; "TLast"; SortOrder.Ascending) As V;
+
+        Collect(colCiclos;
+            With({R: LookUp(colPend; VCRID = V.VCRID).Rest;
+                  NJ: CountRows(Filter(colCiclos;
+                        Cultivo = V.Cultivo && Plantas < Cap
+                        && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                        && FechaTrasplante <= DateAdd(V.TLast; varAgrupar; TimeUnit.Days)));
+                  C: First(SortByColumns(SortByColumns(
+                        ForAll(Filter(colInv; Find(";" & V.Cultivo & ";"; Cultivos) > 0) As G;
+                            {Cod: G.Cod; Cap: G.Cap; Tipo: G.Tipo;
+                             Ini: If(LookUp(colLibre; Cod = G.Cod).Libre >
+                                     DateAdd(V.Early; If(G.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days);
+                                     LookUp(colLibre; Cod = G.Cod).Libre;
+                                     DateAdd(V.Early; If(G.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days))});
+                        "Cap"; SortOrder.Descending); "Ini"; SortOrder.Ascending))};
+                If(R > 0 && NJ = 0 && C.Cod <> "" && C.Ini <= varFinPlan;
+                    Table({Lote: "L" & Text(CountRows(colCiclos) + 1; "[$-en-US]000");
+                           Inv: C.Cod; Tipo: C.Tipo; Cultivo: V.Cultivo; ES: V.ES;
+                           FechaTrasplante: C.Ini;
+                           FechaFin: DateAdd(C.Ini; V.Ciclo; TimeUnit.Days);
+                           FechaLibre: DateAdd(C.Ini; V.Ciclo + V.Ventana; TimeUnit.Days);
+                           Cap: C.Cap; Plantas: 0; Origen: "Auto"; Hex: V.Hex});
+                    Filter(colCiclos; false))));;
+
+        Collect(colAsign;
+            With({R: LookUp(colPend; VCRID = V.VCRID).Rest;
+                  T: If(CountRows(Filter(colCiclos; Plantas = 0)) > 0;
+                        First(Filter(colCiclos; Plantas = 0));
+                        First(SortByColumns(Filter(colCiclos;
+                            Cultivo = V.Cultivo && Plantas < Cap
+                            && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                            && FechaTrasplante <= DateAdd(V.TLast; varAgrupar; TimeUnit.Days));
+                            "FechaTrasplante"; SortOrder.Ascending)))};
+                If(R > 0 && T.Lote <> "";
+                    Table({Lote: T.Lote; VCRID: V.VCRID; Nombre: V.Nombre;
+                           Cultivo: V.Cultivo; ES: V.ES; Inv: T.Inv;
+                           Plantas: If(R <= (T.Cap - T.Plantas) + T.Cap * varSobre / 100;
+                                       R; T.Cap - T.Plantas);
+                           Siembra: DateAdd(T.FechaTrasplante;
+                                    -If(T.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days);
+                           Trasplante: T.FechaTrasplante;
+                           Fin: T.FechaFin;
+                           Estado: If(T.FechaTrasplante >
+                                      If(T.Tipo = "Directa"; V.Last; V.TLast);
+                                      "Atrasado"; "Programado");
+                           Origen: "Auto"; Hex: V.Hex});
+                    Filter(colAsign; false))));;
+
+        ForAll(Filter(colCiclos; Plantas = 0) As Z;
+            Patch(colCiclos; LookUp(colCiclos; Lote = Z.Lote);
+                {Plantas: Sum(Filter(colAsign; Lote = Z.Lote); Plantas)}));;
+
+        ForAll(Filter(colCiclos; Lote = Last(colAsign).Lote) As Z;
+            Patch(colCiclos; LookUp(colCiclos; Lote = Z.Lote);
+                {Plantas: Sum(Filter(colAsign; Lote = Z.Lote); Plantas)}));;
+
+        ForAll(Filter(colLibre; Cod = Last(colAsign).Inv) As L;
+            Patch(colLibre; LookUp(colLibre; Cod = L.Cod);
+                {Libre: LookUp(colCiclos; Lote = Last(colAsign).Lote).FechaLibre}));;
+
+        Patch(colPend; LookUp(colPend; VCRID = V.VCRID);
+            {Rest: LookUp(colVCR; VCRID = V.VCRID).Plantas
+                   - Sum(Filter(colAsign; VCRID = V.VCRID); Plantas)})
+    )
+);;
+
+ForAll(Filter(colPend; Rest > 0) As V;
+    Collect(colAsign;
+        {Lote: ""; VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+         Inv: "-"; Plantas: V.Rest; Siembra: V.Early; Trasplante: V.Early; Fin: V.Early;
+         Estado: "Sin cupo"; Origen: "Auto"; Hex: V.Hex}));;
+
+Select(btnKPI);;
+Set(varMsg; "Plan generado: " & CountRows(colCiclos) & " ciclos");;
+
+==============================================================================
+  5. btnAgrupar . OnSelect   (reemplazar todo)
+==============================================================================
+
+ClearCollect(colGEst; {GN: 0; Crop: ""; LastMin: varIniPlan});;
+ClearCollect(colOrdG;
+    If(varGBase = "early";
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending);
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending)));;
+
+ForAll(colOrdG As V;
+    Patch(colGEst; First(colGEst);
+        {GN: If(V.Cultivo <> First(colGEst).Crop
+                || V.Early > DateAdd(First(colGEst).LastMin; varProx; TimeUnit.Days);
+                First(colGEst).GN + 1; First(colGEst).GN);
+         Crop: V.Cultivo;
+         LastMin: If(V.Cultivo <> First(colGEst).Crop
+                     || V.Early > DateAdd(First(colGEst).LastMin; varProx; TimeUnit.Days);
+                     V.Last;
+                     If(V.Last < First(colGEst).LastMin; V.Last; First(colGEst).LastMin))});;
+    Patch(colVCR; LookUp(colVCR; VCRID = V.VCRID); {Gid: First(colGEst).GN}));;
+
+ClearCollect(colGrupos;
+    ForAll(Distinct(colVCR; Gid) As G;
+        With({it: Filter(colVCR; Gid = G.Value)};
+            {Gid: G.Value;
+             Cultivo: First(it).Cultivo;
+             ES: First(it).ES;
+             Hex: First(it).Hex;
+             Ini: First(SortByColumns(it; "Early"; SortOrder.Ascending)).Early;
+             Fin: First(SortByColumns(it; "Last"; SortOrder.Descending)).Last;
+             Comun: First(SortByColumns(it; "Last"; SortOrder.Ascending)).Last;
+             VCRs: CountRows(it);
+             Plantas: Sum(it; Plantas)})));;
+
+==============================================================================
+  6. btnAsignarManual . OnSelect   (reemplazar todo)
+==============================================================================
+
+ClearCollect(colSelV; ForAll(colSel As S; LookUp(colVCR; VCRID = S.VCRID)));;
+Set(varGh; LookUp(colInv; Cod = drpInvManual.Selected.Cod));;
+Set(varT; dtpFechaManual.SelectedDate);;
+
+If(CountRows(colSelV) = 0;
+    Set(varMsg; "Selecciona al menos un VCR");
+ CountRows(Distinct(colSelV; Cultivo)) > 1;
+    Set(varMsg; "El lote debe ser de un solo cultivo");
+ Find(";" & First(colSelV).Cultivo & ";"; varGh.Cultivos) = 0;
+    Set(varMsg; varGh.Cod & " no admite " & First(colSelV).ES);
+ IsBlank(varT);
+    Set(varMsg; "Indica la fecha de trasplante");
+ varT < LookUp(colLibre; Cod = varGh.Cod).Libre;
+    Set(varMsg; varGh.Cod & " esta ocupado hasta el "
+        & Text(LookUp(colLibre; Cod = varGh.Cod).Libre; "dd/mm/yyyy"));
+
+    Collect(colCiclos;
+        {Lote: "M" & Text(CountRows(colCiclos) + 1; "[$-en-US]000");
+         Inv: varGh.Cod; Tipo: varGh.Tipo;
+         Cultivo: First(colSelV).Cultivo; ES: First(colSelV).ES;
+         FechaTrasplante: varT;
+         FechaFin: DateAdd(varT; First(colSelV).Ciclo; TimeUnit.Days);
+         FechaLibre: DateAdd(varT; First(colSelV).Ciclo + First(colSelV).Ventana; TimeUnit.Days);
+         Cap: varGh.Cap; Plantas: 0; Origen: "Manual"; Hex: First(colSelV).Hex})
+);;
+
+Set(varLoteM; Last(colCiclos).Lote);;
+
+ForAll(SortByColumns(colSelV; "TLast"; SortOrder.Ascending) As V;
+    Collect(colAsign;
+        With({L: LookUp(colCiclos; Lote = varLoteM);
+              usado: Sum(Filter(colAsign; Lote = varLoteM); Plantas);
+              rest: V.Plantas - Sum(Filter(colAsign; VCRID = V.VCRID && Estado <> "Sin cupo"); Plantas)};
+            If(L.Origen = "Manual" && rest > 0 && usado < L.Cap;
+                Table({Lote: L.Lote; VCRID: V.VCRID; Nombre: V.Nombre;
+                       Cultivo: V.Cultivo; ES: V.ES; Inv: L.Inv;
+                       Plantas: If(rest <= L.Cap - usado + L.Cap * varSobre / 100;
+                                   rest; L.Cap - usado);
+                       Siembra: DateAdd(L.FechaTrasplante;
+                                -If(L.Tipo = "Directa"; 0; V.Semillero); TimeUnit.Days);
+                       Trasplante: L.FechaTrasplante; Fin: L.FechaFin;
+                       Estado: If(L.FechaTrasplante > If(L.Tipo = "Directa"; V.Last; V.TLast);
+                                  "Atrasado"; "Programado");
+                       Origen: "Manual"; Hex: V.Hex});
+                Filter(colAsign; false)))));;
+
+Patch(colCiclos; LookUp(colCiclos; Lote = varLoteM);
+    {Plantas: Sum(Filter(colAsign; Lote = varLoteM); Plantas)});;
+Patch(colLibre; LookUp(colLibre; Cod = varGh.Cod);
+    {Libre: LookUp(colCiclos; Lote = varLoteM).FechaLibre});;
+Clear(colSel);;
+Select(btnKPI);;
+Set(varMsg; "Lote " & varLoteM & " creado en " & varGh.Cod & ": "
+    & Text(LookUp(colCiclos; Lote = varLoteM).Plantas; "#,##0") & " plantas");;
+
+==============================================================================
+  7. drpMover . OnChange   (reemplazar todo)
+==============================================================================
+
+Set(varMvLote; ThisItem.Lote);;
+Set(varMvVcrId; ThisItem.VCRID);;
+Set(varMvN; ThisItem.Plantas);;
+Set(varMvDest; Self.Selected.Cod);;
+Set(varMvV; LookUp(colVCR; VCRID = varMvVcrId));;
+Set(varMvG; LookUp(colInv; Cod = varMvDest));;
+
+ClearCollect(colBkCiclos; colCiclos);;
+ClearCollect(colBkAsign; colAsign);;
+ClearCollect(colBkLibre; colLibre);;
+
+Patch(colCiclos; LookUp(colCiclos; Lote = varMvLote);
+    {Plantas: LookUp(colCiclos; Lote = varMvLote).Plantas - varMvN});;
+RemoveIf(colAsign; Lote = varMvLote && VCRID = varMvVcrId);;
+RemoveIf(colCiclos; Lote = varMvLote && Plantas <= 0);;
+
+Set(varMvJoin;
+    First(SortByColumns(Filter(colCiclos;
+        Inv = varMvDest && Cultivo = varMvV.Cultivo && Plantas < Cap
+        && FechaTrasplante >= DateAdd(varMvV.TEarly; -varAgrupar; TimeUnit.Days)
+        && FechaTrasplante <= DateAdd(varMvV.TLast; varAgrupar; TimeUnit.Days));
+        "FechaTrasplante"; SortOrder.Ascending)));;
+
+Set(varMvIni;
+    If(LookUp(colLibre; Cod = varMvDest).Libre >
+       DateAdd(varMvV.Early; If(varMvG.Tipo = "Directa"; 0; varMvV.Semillero); TimeUnit.Days);
+       LookUp(colLibre; Cod = varMvDest).Libre;
+       DateAdd(varMvV.Early; If(varMvG.Tipo = "Directa"; 0; varMvV.Semillero); TimeUnit.Days)));;
+
+If(varMvJoin.Lote = "" && varMvIni <= varFinPlan;
+    Collect(colCiclos;
+        {Lote: "M" & Text(CountRows(colCiclos) + 1; "[$-en-US]000");
+         Inv: varMvDest; Tipo: varMvG.Tipo; Cultivo: varMvV.Cultivo; ES: varMvV.ES;
+         FechaTrasplante: varMvIni;
+         FechaFin: DateAdd(varMvIni; varMvV.Ciclo; TimeUnit.Days);
+         FechaLibre: DateAdd(varMvIni; varMvV.Ciclo + varMvV.Ventana; TimeUnit.Days);
+         Cap: varMvG.Cap; Plantas: 0; Origen: "Manual"; Hex: varMvV.Hex}));;
+
+Set(varMvT; If(varMvJoin.Lote <> ""; varMvJoin; Last(colCiclos)));;
+
+If(varMvT.Lote <> "" && varMvT.Inv = varMvDest;
+    Collect(colAsign;
+        {Lote: varMvT.Lote; VCRID: varMvV.VCRID; Nombre: varMvV.Nombre;
+         Cultivo: varMvV.Cultivo; ES: varMvV.ES; Inv: varMvDest;
+         Plantas: If(varMvN <= varMvT.Cap - varMvT.Plantas + varMvT.Cap * varSobre / 100;
+                     varMvN; varMvT.Cap - varMvT.Plantas);
+         Siembra: DateAdd(varMvT.FechaTrasplante;
+                  -If(varMvT.Tipo = "Directa"; 0; varMvV.Semillero); TimeUnit.Days);
+         Trasplante: varMvT.FechaTrasplante; Fin: varMvT.FechaFin;
+         Estado: If(varMvT.FechaTrasplante > varMvV.TLast; "Atrasado"; "Programado");
+         Origen: "Manual"; Hex: varMvV.Hex}));;
+
+Patch(colCiclos; LookUp(colCiclos; Lote = varMvT.Lote);
+    {Plantas: Sum(Filter(colAsign; Lote = varMvT.Lote); Plantas)});;
+Patch(colLibre; LookUp(colLibre; Cod = varMvDest);
+    {Libre: LookUp(colCiclos; Lote = varMvT.Lote).FechaLibre});;
+
+Set(varMvOk; CountRows(Filter(colAsign; VCRID = varMvVcrId && Inv = varMvDest)) > 0);;
+If(!varMvOk; ClearCollect(colCiclos; colBkCiclos));;
+If(!varMvOk; ClearCollect(colAsign; colBkAsign));;
+If(!varMvOk; ClearCollect(colLibre; colBkLibre));;
+Set(varMsgModal;
+    If(varMvOk; "VCR movido a " & varMvDest;
+       varMvDest & " no tiene espacio en el horizonte; el VCR se queda donde estaba"));;
+
+Set(varInvSel; varMvDest);;
+Set(varLoteVer; varMvT.Lote);;
+Select(btnKPI);;
+Reset(Self);;
+
+==============================================================================
+  8. LOS 8 COMBOBOX
+==============================================================================
+
+drpSitio . Items                 colOpcSitio
+drpSitio . ItemDisplayText       ThisItem.Sitio
+drpSitio . OnChange              Set(varSitio; Self.Selected.Sitio);; Select(btnRecalcular)
+
+drpBloque . Items                colOpcBloque
+drpBloque . ItemDisplayText      ThisItem.Nom
+drpBloque . OnChange             Set(varFBloque; Self.Selected.Bloque)
+
+drpCultivoTL . Items             colOpcCultivo
+drpCultivoTL . ItemDisplayText   ThisItem.Nom
+drpCultivoTL . OnChange          Set(varFCultivo; Self.Selected.Cultivo)
+
+drpCultivoVCR . Items            colOpcCultivo
+drpCultivoVCR . ItemDisplayText  ThisItem.Nom
+drpCultivoVCR . OnChange         Set(varFCultivoVCR; Self.Selected.Cultivo)
+
+drpCriterio . Items              colOpcCriterio
+drpCriterio . ItemDisplayText    ThisItem.Nom
+drpCriterio . OnChange           Set(varGBase; Self.Selected.Modo);; Select(btnAgrupar)
+
+drpInvManual . Items             ForAll(colInv As G; {Cod: G.Cod; Nom: G.Cod & " - " & Text(G.Cap; "#,##0") & " pl"})
+drpInvManual . ItemDisplayText   ThisItem.Nom
+
+drpMover . Items                 ForAll(Filter(colInv; Find(";" & ThisItem.Cultivo & ";"; Cultivos) > 0 && Cod <> ThisItem.Inv) As G; {Cod: G.Cod; Nom: G.Cod & " - " & Text(G.Cap; "#,##0") & " pl"})
+drpMover . ItemDisplayText       ThisItem.Nom
+
+==============================================================================
+  9. EL RESTO DE FORMULAS
+==============================================================================
+
+galTimeline . Items
+    Filter(colInv; varFBloque = "" || Bloque = varFBloque)
+
+htmlFila . HtmlText   (parte del Concat)
+    Filter(colCiclos; Inv = ThisItem.Cod && (varFCultivo = "" || Cultivo = varFCultivo))
+
+galVCR . Items
+    Filter(colVCR;
+        (varFCultivoVCR = "" || Cultivo = varFCultivoVCR)
+        && (IsBlank(dtpDesde.SelectedDate) || TEarly >= dtpDesde.SelectedDate)
+        && (IsBlank(dtpHasta.SelectedDate) || TLast <= dtpHasta.SelectedDate))
+
+btnAsignarManual . OnSelect   (dentro del bloque)
+    dtpFechaManual.SelectedDate        en lugar de   dtpFechaManualNO.SelectedDate
+
+inpSem . OnChange
+    Patch(colCultivos; LookUp(colCultivos; Cultivo = ThisItem.Cultivo);
+        {Semillero: Value(Self.Text)});;
+    Select(btnRecalcular)
+
+inpCiclo . OnChange
+    Patch(colCultivos; LookUp(colCultivos; Cultivo = ThisItem.Cultivo);
+        {Ciclo: Value(Self.Text)});;
+    Select(btnRecalcular)
+
+inpVent . OnChange
+    Patch(colCultivos; LookUp(colCultivos; Cultivo = ThisItem.Cultivo);
+        {Ventana: Value(Self.Text)});;
+    Select(btnRecalcular)
+
+inpVentanaGlobal . OnChange
+    Set(varVentanaGlobal; Value(Self.Text));;
+    ForAll(colCultivos As C;
+        Patch(colCultivos; LookUp(colCultivos; Cultivo = C.Cultivo);
+            {Ventana: varVentanaGlobal}));;
+    Select(btnAuto)
+
+btnGuardar . OnSelect   (mientras no conectes las listas)
+    Set(varMsg; "Conecta PLN_Ciclos y PLN_Asignacion para guardar el plan")
+
+==============================================================================
+  10. PENDIENTES FINALES: division entre cero, idioma y leyenda
+==============================================================================
+
+==============================================================================
+  A. DIVISION ENTRE CERO  (lblLoteInfo, lblLoteFechas, lblVcrL)
+==============================================================================
+Causa: cuando varLoteVer esta vacio, LookUp(colCiclos; Lote = varLoteVer)
+devuelve un registro en blanco y Cap vale 0. Todo porcentaje se protege con
+Max(1; ...) en el divisor.
+
+lblLoteInfo . Text
+    With({C: LookUp(colCiclos; Lote = varLoteVer)};
+        If(IsBlank(C.Lote);
+            "Selecciona un lote de la izquierda";
+            "Trasplante " & Text(C.FechaTrasplante; "dd/mmm") &
+            "   fin " & Text(C.FechaFin; "dd/mmm") &
+            "   libre " & Text(C.FechaLibre; "dd/mmm") & Char(10) &
+            Text(C.Plantas; "#,##0") & " de " & Text(C.Cap; "#,##0") &
+            " plantas (" & Text(C.Plantas / Max(1; C.Cap); "[$-en-US]0%") & ")"))
+
+lblLoteFechas . Text        (dentro de galLotes)
+    "Trasplante " & Text(ThisItem.FechaTrasplante; "dd/mmm") &
+    "   fin " & Text(ThisItem.FechaFin; "dd/mmm") &
+    "   libre " & Text(ThisItem.FechaLibre; "dd/mmm") & Char(10) &
+    Text(ThisItem.Plantas; "#,##0") & " / " & Text(ThisItem.Cap; "#,##0") &
+    " pl (" & Text(ThisItem.Plantas / Max(1; ThisItem.Cap); "[$-en-US]0%") & ")"
+
+lblVcrL . Text              (dentro de galVCRLote)
+    ThisItem.VCRID & "   " & Text(ThisItem.Plantas; "#,##0") & " pl   (" &
+    Text(ThisItem.Plantas /
+         Max(1; LookUp(colCiclos; Lote = varLoteVer).Cap); "[$-en-US]0%") &
+    " del lote)"
+
+htmlLoteMeter . HtmlText
+    With({C: LookUp(colCiclos; Lote = varLoteVer)};
+        "<div style='height:8px;width:100%;background:#e6e6dd;border-radius:9px;'>" &
+        "<div style='height:8px;width:" &
+        Text(Min(100; C.Plantas / Max(1; C.Cap) * 100); "[$-en-US]0.##") &
+        "%;background:#2c7a5d;border-radius:9px;'></div></div>")
+
+==============================================================================
+  B. EL CODIGO DE IDIOMA es-GT NO ES COMPATIBLE
+==============================================================================
+Causa: [$-es-GT] no esta en la lista de idiomas que acepta Text() en este
+entorno. La solucion es quitar el prefijo: sin etiqueta, Text() usa el idioma
+de la app, que ya es espanol.
+
+REEMPLAZO GLOBAL en todas las formulas de la pantalla:
+    "#,##0"      ->   "#,##0"
+    "dd/mmm"     ->   "dd/mmm"
+    "dd/mm/yyyy" ->   "dd/mm/yyyy"
+    "[$-es-GT]mmm"        ->   "mmm"
+
+NO tocar [$-en-US]. Ese se queda donde esta, porque fuerza el punto decimal
+que necesita el CSS de los controles HTML.
+
+Controles afectados:
+    btnKPI.OnSelect        lblCap.Text            lblPlantas.Text
+    lblAsignado.Text       lblGrupo.Text          lblResumenSel.Text
+    lblResPlantas.Text     lblResCap.Text         lblModalSub.Text
+    lblPlantasL.Text       lblSiembraL.Text       lblEarly.Text
+    lblLast.Text           lblVentana.Text        htmlOcup.HtmlText
+    htmlRegla.HtmlText     drpInvManual.Items     drpMover.Items
+    btnAsignarManual.OnSelect                     btnAuto.OnSelect
+
+lblKPIVal . Text
+    ThisItem.Val
+lblKPIVal . Color
+    Switch(ThisItem.Alerta;
+        "ok";  RGBA(12; 163; 12; 1);
+        "mal"; RGBA(208; 59; 59; 1);
+        RGBA(18; 18; 14; 1))
+lblKPILab . Text
+    ThisItem.Lab
+lblKPISub . Text
+    ThisItem.Sub
+
+==============================================================================
+  C. galLeyenda: QUE INFORMACION LLEVA
+==============================================================================
+Es la leyenda de colores de la linea de tiempo: un cuadro del color del
+cultivo, su nombre y los dias de ciclo. Cinco filas, una por cultivo.
+
+galLeyenda . Items
+    colCultivos
+galLeyenda . Layout
+    Layout.Horizontal
+galLeyenda . TemplateSize
+    150
+
+Dentro de la plantilla, dos controles:
+
+recLeyendaColor       Rectangulo
+    Fill              ColorValue(ThisItem.Hex)
+    Width             12
+    Height            12
+    X                 6
+    Y                 14
+    RadiusTopLeft / RadiusTopRight / RadiusBottomLeft / RadiusBottomRight   3
+
+lblLeyenda            Etiqueta
+    Text              ThisItem.ES & "  " & ThisItem.Ciclo & " d"
+    X                 24
+    Y                 8
+    Width             120
+    Height            24
+    Size              9
+
+==============================================================================
+  D. UBICACION DE htmlRegla Y htmlOcup
+==============================================================================
+Las dos estan bien donde estan. Confirmacion del orden dentro de conTL:
+
+conTL   (contenedor vertical)
+  1. conFiltrosTL     Height 52    drpBloque, drpCultivoTL, galLeyenda
+  2. conRegla         Height 40    lblReglaCap (Width 178) + htmlRegla (Fill 1)
+  3. galTimeline      FillPortions 1
+  4. conOcup          Height 150   lblOcupLab (Width 178) + htmlOcup (Fill 1)
+
+htmlRegla dibuja los meses y las semanas; tiene que quedar a la derecha de
+lblReglaCap y con el mismo ancho que las barras de galTimeline, por eso
+lblReglaCap y lblCod+lblCap suman los mismos 178 px.
+
+htmlOcup dibuja las barras de ocupacion semanal; mismo criterio, a la derecha
+de lblOcupLab con sus 178 px.
+
+==============================================================================
+  E. conInvHdr Y galInv: CONFIRMACION DE ORDEN
+==============================================================================
+El orden de conInvHdr debe ser identico al de conInvFila, y los anchos
+tambien, o las columnas no cuadran:
+
+  POSICION  ENCABEZADO        ANCHO    FILA (conInvFila)
+  1         lblHdrCod          90      btnVerCasa
+  2         lblHdrBloque      130      lblBloque
+  3         lblHdrTipo        100      lblTipo
+  4         lblHdrCultivos    Fill 1   lblCultivos
+  5         lblHdrDens         90      inpDens
+  6         lblHdrCap         100      inpCap
+  7         lblHdrDisp        150      dtpDisp
+  8         lblHdrCiclos       80      lblCiclos
+  9         lblHdrUso         120      htmlUso
+
+Las nueve etiquetas del encabezado comparten:
+    Height 34   FillPortions 0 (salvo lblHdrCultivos, que va en 1)
+    AlignInContainer  AlignInContainer.Stretch
+    Size 10     FontWeight  FontWeight.Semibold
+    Color       RGBA(132; 131; 122; 1)
+
+==============================================================================
+  11. PROPIEDADES DE DISENO PENDIENTES
+==============================================================================
+
+Solo las diferencias contra el diseno objetivo. Lo que ya esta correcto
+no aparece. Agrupadas por contenedor, en el orden del arbol.
+
+REGLA DE FONDO: dentro de un contenedor de diseno un solo hijo lleva
+FillPortions = 1 (el que debe crecer) y todos los demas FillPortions = 0
+con su Width o Height fijo.
+
+------------------------------------------------------------------------------
+  scrPlan   (Pantalla)
+------------------------------------------------------------------------------
+
+  conModal               Contenedor
+      Width                = Min(900; Parent.Width-40)
+      X                    = (Parent.Width-Self.Width)/2
+
+  recModalBg             Rectangle
+      X                    = 0
+      Y                    = 0
+
+  conApp                 Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conModal   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conModalHdr            Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+
+  conModalBody           Contenedor
+      FillPortions         = 1
+
+
+------------------------------------------------------------------------------
+  conModalHdr   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblModalSub            Label
+      FillPortions         = 1
+      Height               = 34
+
+  btnCerrarModal         Button
+      Width                = 96
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conModalBody   (GroupContainer)
+------------------------------------------------------------------------------
+
+  galLotes               Gallery
+      FillPortions         = 0
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = true
+
+  conDetalle             Contenedor
+      FillPortions         = 1
+
+
+------------------------------------------------------------------------------
+  galLotes   (Gallery)
+------------------------------------------------------------------------------
+
+  conLoteItem            Contenedor
+      LayoutAlignItems     = LayoutAlignItems.Stretch
+      Height               = Parent.TemplateHeight-6
+
+
+------------------------------------------------------------------------------
+  conLoteItem   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblLoteTit             Label
+      AlignInContainer     = AlignInContainer.Stretch
+      FillPortions         = 0
+      Height               = 24
+
+  lblLoteFechas          Label
+      AlignInContainer     = AlignInContainer.Stretch
+      FillPortions         = 1
+
+
+------------------------------------------------------------------------------
+  conDetalle   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblLoteInfo            Label
+      FillPortions         = 0
+      Height               = 56
+
+  htmlLoteMeter          HtmlViewer
+      FillPortions         = 0
+      Height               = 14
+
+  galVCRLote             Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = true
+
+  conModalPie            Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+
+
+------------------------------------------------------------------------------
+  galVCRLote   (Gallery)
+------------------------------------------------------------------------------
+
+  conVcrLoteFila         Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conVcrLoteFila   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblVcrL                Label
+      FillPortions         = 0
+
+  lblPlantasL            Label
+      FillPortions         = 0
+
+  drpMover               ModernCombobox
+      Width                = 190
+      FillPortions         = 0
+
+  btnQuitarVCR           Button
+      FillPortions         = 0
+
+  lblSiembraL            Label
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conModalPie   (GroupContainer)
+------------------------------------------------------------------------------
+
+  btnQuitarLote          Button
+      Width                = 180
+      Height               = 36
+      FillPortions         = 0
+
+  lblModalMsg            Label
+      Height               = 36
+
+  btnRellenar            Button
+      Width                = 190
+      Height               = 36
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conApp   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conHeader              Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+
+  conKPI                 Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+      Height               = 100
+
+  conTabs                Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+      Height               = 48
+
+  conBody                Contenedor
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+
+
+------------------------------------------------------------------------------
+  conHeader   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conCtrl                Contenedor
+      FillPortions         = 1
+
+
+------------------------------------------------------------------------------
+  conMarca   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblTitulo              Label
+      FillPortions         = 0
+      Height               = 30
+
+  lblSubtitulo           Label
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conCtrl   (GroupContainer)
+------------------------------------------------------------------------------
+
+  drpSitio               ModernCombobox
+      Width                = 190
+      Height               = 40
+      FillPortions         = 0
+
+  inpVentana             TextInput
+      Width                = 76
+      Height               = 40
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  inpAgrupar             TextInput
+      Width                = 76
+      Height               = 40
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  inpSobre               TextInput
+      Width                = 76
+      Height               = 40
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  btnAuto                Button
+      Width                = 200
+      Height               = 40
+      FillPortions         = 0
+
+  btnLimpiar             Button
+      Width                = 100
+      Height               = 40
+      FillPortions         = 0
+
+  btnGuardar             Button
+      Width                = 130
+      Height               = 40
+      FillPortions         = 0
+
+  btnKPI                 Button
+      Width                = 1
+      Height               = 1
+      FillPortions         = 0
+
+  btnAgrupar             Button
+      Width                = 1
+      Height               = 1
+      FillPortions         = 0
+
+  lblMsgGlobal           Label
+      FillPortions         = 1
+      Height               = 40
+
+  inpVentanaGlobal       TextInput
+      Width                = 76
+      Height               = 40
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  btnRecalcular          Button
+      Width                = 1
+      Height               = 1
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conKPI   (GroupContainer)
+------------------------------------------------------------------------------
+
+  galKPI                 Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Horizontal
+      TemplateSize         = 224
+      Width                = BORRAR
+
+
+------------------------------------------------------------------------------
+  galKPI   (Gallery)
+------------------------------------------------------------------------------
+
+  conKPIItem             Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conKPIItem   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblKPILab              Label
+      AlignInContainer     = AlignInContainer.Stretch
+      FillPortions         = 0
+      Height               = 18
+
+  lblKPIVal              Label
+      AlignInContainer     = AlignInContainer.Stretch
+      FillPortions         = 0
+      Height               = 36
+
+  lblKPISub              Label
+      AlignInContainer     = AlignInContainer.Stretch
+      FillPortions         = 1
+
+
+------------------------------------------------------------------------------
+  conTabs   (GroupContainer)
+------------------------------------------------------------------------------
+
+  galTabs                Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Horizontal
+      TemplateSize         = 186
+
+
+------------------------------------------------------------------------------
+  galTabs   (Gallery)
+------------------------------------------------------------------------------
+
+  btnTab                 Button
+      Height               = 40
+
+
+------------------------------------------------------------------------------
+  conBody   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conTL                  Contenedor
+      LayoutAlignItems     = LayoutAlignItems.Stretch
+      FillPortions         = 1
+
+  conINV                 Contenedor
+      FillPortions         = 1
+
+  conASG                 Contenedor
+      FillPortions         = 1
+
+  conPAR                 Contenedor
+      FillPortions         = 1
+
+  conVCR                 Contenedor
+      FillPortions         = 1
+
+
+------------------------------------------------------------------------------
+  conTL   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conFiltrosTL           Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+
+  conRegla               Contenedor
+      LayoutAlignItems     = LayoutAlignItems.Stretch
+      AlignInContainer     = AlignInContainer.Stretch
+
+  galTimeline            Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = true
+
+  conOcup                Contenedor
+      LayoutAlignItems     = LayoutAlignItems.Stretch
+      AlignInContainer     = AlignInContainer.Stretch
+
+
+------------------------------------------------------------------------------
+  conFiltrosTL   (GroupContainer)
+------------------------------------------------------------------------------
+
+  drpBloque              ModernCombobox
+      Width                = 230
+      FillPortions         = 0
+
+  drpCultivoTL           ModernCombobox
+      Width                = 180
+      FillPortions         = 0
+
+  galLeyenda             Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Horizontal
+      ShowScrollbar        = false
+      Height               = BORRAR
+
+
+------------------------------------------------------------------------------
+  conRegla   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblReglaCap            Label
+      FillPortions         = 0
+      AlignInContainer     = AlignInContainer.Stretch
+
+  htmlRegla              HtmlViewer
+      AlignInContainer     = AlignInContainer.Stretch
+
+
+------------------------------------------------------------------------------
+  galTimeline   (Gallery)
+------------------------------------------------------------------------------
+
+  conFila                Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conFila   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblCod                 Label
+      FillPortions         = 0
+
+  lblCap                 Label
+      FillPortions         = 0
+
+  htmlFila               HtmlViewer
+      AlignInContainer     = AlignInContainer.Stretch
+
+
+------------------------------------------------------------------------------
+  conOcup   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblOcupLab             Label
+      FillPortions         = 0
+
+  htmlOcup               HtmlViewer
+      AlignInContainer     = AlignInContainer.Stretch
+
+
+------------------------------------------------------------------------------
+  conINV   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conInvHdr              Contenedor
+      LayoutAlignItems     = LayoutAlignItems.Stretch
+      AlignInContainer     = AlignInContainer.Stretch
+      Height               = 34
+
+  galInv                 Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = true
+
+
+------------------------------------------------------------------------------
+  conInvHdr   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblHdrCod              Label
+      FillPortions         = 0
+
+  lblHdrBloque           Label
+      Width                = 130
+      FillPortions         = 0
+
+  lblHdrTipo             Label
+      FillPortions         = 0
+
+  lblHdrDens             Label
+      FillPortions         = 0
+
+  lblHdrCap              Label
+      FillPortions         = 0
+
+  lblHdrDisp             Label
+      Width                = 150
+      FillPortions         = 0
+
+  lblHdrCiclos           Label
+      FillPortions         = 0
+
+  lblHdrUso              Label
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  galInv   (Gallery)
+------------------------------------------------------------------------------
+
+  conInvFila             Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conInvFila   (GroupContainer)
+------------------------------------------------------------------------------
+
+  btnVerCasa             Button
+      Height               = 34
+      FillPortions         = 0
+
+  lblBloque              Label
+      Width                = 130
+      FillPortions         = 0
+
+  lblTipo                Label
+      FillPortions         = 0
+
+  dtpDisp                ModernDatePicker
+      Height               = 34
+      FillPortions         = 0
+
+  lblCiclos              Label
+      FillPortions         = 0
+
+  htmlUso                HtmlViewer
+      FillPortions         = 0
+
+  inpCap                 TextInput
+      Height               = 34
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  inpDens                TextInput
+      Height               = 34
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+
+------------------------------------------------------------------------------
+  conASG   (GroupContainer)
+------------------------------------------------------------------------------
+
+  galResumen             Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = true
+
+  galAsign               Gallery
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = true
+
+
+------------------------------------------------------------------------------
+  galResumen   (Gallery)
+------------------------------------------------------------------------------
+
+  conResFila             Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conResFila   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblResCiclos           Label
+      Width                = 80
+      FillPortions         = 0
+
+  lblResPlantas          Label
+      Width                = 120
+      FillPortions         = 0
+
+  lblResSemanas          Label
+      Width                = 100
+      FillPortions         = 0
+
+  lblResCultivos         Label
+      FillPortions         = 1
+
+  lblResCod              Label
+      Width                = 110
+      FillPortions         = 0
+
+  lblResCap              Label
+      Width                = 110
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  Container35   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblSemIni              Label
+      Width                = 80
+      FillPortions         = 0
+
+  lblEstadoAsg           Label
+      Width                = 120
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conPAR   (GroupContainer)
+------------------------------------------------------------------------------
+
+  galCultivos            Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = false
+
+
+------------------------------------------------------------------------------
+  galCultivos   (Gallery)
+------------------------------------------------------------------------------
+
+  conCulFila             Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conCulFila   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblCultivo1            Label
+      Width                = 200
+      FillPortions         = 0
+
+  lblCicloTotal          Label
+      Width                = 130
+      FillPortions         = 0
+
+  lblCiclosAnio          Label
+      FillPortions         = 1
+
+  inpSem                 TextInput
+      Height               = 34
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  inpCiclo               TextInput
+      Height               = 34
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  inpVent                TextInput
+      Height               = 34
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+
+------------------------------------------------------------------------------
+  conVCR   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conGrupos              Contenedor
+      LayoutAlignItems     = LayoutAlignItems.Stretch
+      AlignInContainer     = AlignInContainer.Stretch
+
+  conFiltrosVCR          Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+
+  conManual              Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+
+  galVCR                 Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Vertical
+      ShowScrollbar        = true
+
+
+------------------------------------------------------------------------------
+  conGrupos   (GroupContainer)
+------------------------------------------------------------------------------
+
+  conGruposCtrl          Contenedor
+      AlignInContainer     = AlignInContainer.Stretch
+
+  galGrupos              Gallery
+      FillPortions         = 1
+      AlignInContainer     = AlignInContainer.Stretch
+      Layout               = Layout.Horizontal
+      TemplateSize         = 256
+      ShowScrollbar        = true
+
+
+------------------------------------------------------------------------------
+  conGruposCtrl   (GroupContainer)
+------------------------------------------------------------------------------
+
+  inpProx                TextInput
+      Width                = 76
+      Height               = 40
+      FillPortions         = 0
+      Format               = TextFormat.Number
+
+  lblResumenSel          Label
+      FillPortions         = 1
+      Height               = 40
+
+  drpCriterio            ModernCombobox
+      Width                = 250
+      Height               = 40
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  galGrupos   (Gallery)
+------------------------------------------------------------------------------
+
+  conGrupoItem           Contenedor
+      LayoutAlignItems     = LayoutAlignItems.Stretch
+
+
+------------------------------------------------------------------------------
+  conGrupoItem   (GroupContainer)
+------------------------------------------------------------------------------
+
+  lblGrupo               Label
+      AlignInContainer     = AlignInContainer.Stretch
+
+  btnSolo                Button
+      Width                = 96
+      Height               = 28
+      FillPortions         = 0
+
+  btnMas                 Button
+      Height               = 28
+      FillPortions         = 0
+
+  btnMenos               Button
+      Width                = 34
+      Height               = 28
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conFiltrosVCR   (GroupContainer)
+------------------------------------------------------------------------------
+
+  drpCultivoVCR          ModernCombobox
+      Width                = 190
+      Height               = 40
+      FillPortions         = 0
+
+  dtpDesde               ModernDatePicker
+      Width                = 170
+      Height               = 40
+      FillPortions         = 0
+
+  dtpHasta               ModernDatePicker
+      Width                = 170
+      Height               = 40
+      FillPortions         = 0
+
+  btnSelFilt             Button
+      Width                = 180
+      Height               = 40
+      FillPortions         = 0
+
+  btnSelNone             Button
+      Width                = 150
+      Height               = 40
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  conManual   (GroupContainer)
+------------------------------------------------------------------------------
+
+  drpInvManual           ModernCombobox
+      Width                = 240
+      FillPortions         = 0
+
+  btnAsignarManual       Button
+      Width                = 210
+      Height               = 40
+      FillPortions         = 0
+
+  lblMsg                 Label
+      FillPortions         = 1
+      Height               = 40
+
+  dtpFechaManual         ModernDatePicker
+      Width                = 180
+      Height               = 40
+      FillPortions         = 0
+
+
+------------------------------------------------------------------------------
+  galVCR   (Gallery)
+------------------------------------------------------------------------------
+
+  conVcrFila             Contenedor
+      X                    = 0
+      Y                    = 0
+
+
+------------------------------------------------------------------------------
+  conVcrFila   (GroupContainer)
+------------------------------------------------------------------------------
+
+  chkSel                 CheckBox
+      Width                = 40
+      Height               = 32
+      FillPortions         = 0
+
+  lblVCRID               Label
+      FillPortions         = 0
+
+  lblCultivo             Label
+      FillPortions         = 0
+
+  lblEarly               Label
+      FillPortions         = 0
+
+  lblLast                Label
+      FillPortions         = 0
+
+  lblPlantas             Label
+      FillPortions         = 0
+
+  lblVentana             Label
+      Width                = 160
+      FillPortions         = 0
+
+  lblAsignado            Label
+      Width                = 90
+      FillPortions         = 0
+
+  lblEstado              Label
+      FillPortions         = 0
+
+  lblCasas               Label
+      FillPortions         = 0
+
+
+==============================================================================
+  12. ORDEN DE APLICACION Y VERIFICACION
+==============================================================================
+
+  1. Crear las 5 listas de la seccion 2 y agregarlas en Agregar datos.
+  2. Pegar el bloque 3 al final de App.OnStart y ejecutar OnStart.
+  3. Reemplazar btnAuto.OnSelect con el bloque 4.
+  4. Reemplazar btnAgrupar, btnAsignarManual y drpMover (bloques 5, 6, 7).
+  5. Aplicar los 8 combobox (bloque 8) y el resto de formulas (bloque 9).
+  6. Recorrer la seccion 10 contenedor por contenedor.
+  7. Presionar btnAuto y revisar los KPIs.
+
+VALORES ESPERADOS
+  Plantas solicitadas .... 136,164  en 186 VCR activos
+  Capacidad instalada ....  90,830  en 33 casas
+  Ciclos programados ..... entre 55 y 75 segun la tolerancia
+  Sin cupo ............... 0 si el horizonte de 56 semanas alcanza
+  Linea de tiempo ........ 33 filas con barras en distintas semanas
+
+SI ALGO SALE RARO
+  Linea de tiempo vacia pero KPIs con numeros:
+    revisar que cada Text() dentro de un style lleve "[$-en-US]0.###"
+  Todo sale Sin cupo con las casas vacias:
+    varRegCuc / varRegSol / varRegTom quedaron en blanco, reejecutar OnStart
+  Un lote con 20 plantas:
+    subir varSobre (sobrecupo) o varAgrupar (tolerancia de agrupacion)
+
+PARAMETROS POR CULTIVO (en colCultivos, editables en la pestana Parametros)
+  Cultivo      Semillero  Invernadero  Ventana  Ciclo total  Ciclos/ano
+  Tomato           28         120          7        127         2.87
+  Pepper           32         130          7        137         2.66
+  Melon            18          90          7         97         3.76
+  Watermelon       20         100          7        107         3.41
+  Cucumber         16          95          7        102         3.58
+
+CADENA DE FECHAS
+  Trasplante = Earliest Start Date + DiasSemillero
+  Fin        = Trasplante + DiasCiclo
+  Casa libre = Fin + DiasVentana
+  En casas de siembra directa el semillero es 0.
