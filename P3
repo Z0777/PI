@@ -1,0 +1,283 @@
+==============================================================================
+  A. EL ERROR "DIVISION ENTRE CERO" AL INICIAR
+==============================================================================
+Todas las divisiones usan varSemanas o Cap como divisor. Si la pantalla se
+pinta antes de que OnStart termine, esas variables valen blanco y Power Apps
+lanza el error. Blindar los cinco divisores con Max(1; ...):
+
+htmlRegla . HtmlText
+    Sem/varSemanas          ->   Sem/Max(1; varSemanas)
+    100/varSemanas          ->   100/Max(1; varSemanas)
+
+htmlFila . HtmlText
+    Plantas/Cap*100         ->   Plantas/Max(1; Cap)*100
+    L/T*100  W/T*100  Q/T*100   ->   con  T: Max(1; varSemanas*7)
+
+htmlUso . HtmlText
+    /7 / varSemanas * 100   ->   /7 / Max(1; varSemanas) * 100
+
+lblCiclosAnio . Text
+    365/(ThisItem.Ciclo + ThisItem.Ventana)
+    ->  365/Max(1; ThisItem.Ciclo + ThisItem.Ventana)
+
+lblModalSub . Text
+    revisar que cualquier / varSemanas quede como / Max(1; varSemanas)
+
+
+==============================================================================
+  B. POR QUE colMeses SALE VACIO
+==============================================================================
+En la version anterior el Filter interno comparaba Month(f) contra Month(i),
+donde i venia de un With de fuera. Power Fx no resuelve bien ese anidamiento y
+devuelve 0 filas, por eso la franja de meses sale en blanco.
+
+Reemplazar en OnStart por estos tres pasos, sin anidar scopes:
+
+Set(varSemanas; RoundUp(DateDiff(varIniPlan; varFinPlan; TimeUnit.Days)/7; 0));;
+
+ClearCollect(colSemanas;
+    ForAll(Sequence(varSemanas) As S;
+        With({f: DateAdd(varIniPlan; (S.Value-1)*7; TimeUnit.Days)};
+            {Sem:    S.Value;
+             Ini:    f;
+             Fin:    DateAdd(f; 6; TimeUnit.Days);
+             WN:     WeekNum(f);
+             MesKey: Year(f)*100 + Month(f);
+             Mes:    Upper(Text(f; "[$-en-US]mmm"))})));;
+
+ClearCollect(colMesesTmp;
+    ForAll(Distinct(colSemanas; MesKey) As K;
+        {MesKey: K.Value;
+         Nom:    First(Filter(colSemanas; MesKey = K.Value)).Mes;
+         Sem:    CountRows(Filter(colSemanas; MesKey = K.Value))}));;
+
+ClearCollect(colMeses; SortByColumns(colMesesTmp; "MesKey"; SortOrder.Ascending));;
+
+Pegar lo mismo al final de btnAnio.OnSelect, antes de Select(btnRecalcular).
+
+
+==============================================================================
+  C. CLIC EN EL CICLO - LA ARQUITECTURA QUE SI FUNCIONA
+==============================================================================
+Un HtmlViewer no tiene OnSelect y no puede decirle a Power Apps cual de sus
+barras tocaste. Con HTML el clic por ciclo NO es posible, punto.
+
+La solucion es dibujar la fila con una GALERIA HORIZONTAL DE SEMANAS en vez de
+HTML. Cada celda es un boton: su color sale del ciclo que ocupa esa semana y
+su OnSelect abre el popup con ESE ciclo. Ademas la regla y las filas usan el
+mismo ancho por semana, asi que la alineacion es exacta por construccion.
+
+------------------------------------------------------------------------------
+  C.1  ELIMINAR
+------------------------------------------------------------------------------
+    conFila      (el contenedor vacio que quedo dentro de galTimeline)
+    htmlFila     (lo reemplaza la galeria de celdas)
+    htmlRegla    (lo reemplazan htmlMes y galReglaSem)
+
+RENOMBRAR
+    Container2   ->   conFila
+
+------------------------------------------------------------------------------
+  C.2  conRegla  -  encabezado en dos filas
+------------------------------------------------------------------------------
+conRegla
+    LayoutDirection   LayoutDirection.Horizontal
+    Height            42
+    PaddingLeft 0   PaddingRight 0   PaddingTop 0   PaddingBottom 0
+
+Hijos en este orden:
+
+lblReglaCap      Etiqueta    Text "Greenhouse"   Width 110   FillPortions 0
+Label1           Etiqueta    Text "Capacity"     Width 68    FillPortions 0
+
+conReglaEje      CONTENEDOR NUEVO, vertical
+    LayoutDirection   LayoutDirection.Vertical
+    FillPortions      1
+    AlignInContainer  AlignInContainer.Stretch
+    LayoutAlignItems  LayoutAlignItems.Stretch
+    Padding (los cuatro)  0
+
+    Dentro, dos hijos:
+
+    htmlMes        CONTROL HTML NUEVO
+        Height          20
+        FillPortions    0
+        AlignInContainer  AlignInContainer.Stretch
+        Padding (los cuatro)  0
+        HtmlText
+
+"<div style='display:flex;width:100%;height:20px;font-family:Segoe UI,sans-serif;'>" &
+Concat(colMeses;
+    "<div style='width:" & Text(Sem/Max(1; varSemanas)*100; "[$-en-US]0.#####") &
+    "%;height:20px;box-sizing:border-box;border-left:2px solid #c7c6ba;" &
+    "font-size:9px;font-weight:700;color:#12120e;text-align:center;" &
+    "line-height:20px;overflow:hidden;white-space:nowrap;'>" & Nom & "</div>")
+& "</div>"
+
+    galReglaSem    GALERIA NUEVA, horizontal
+        Items             colSemanas
+        Layout            Layout.Horizontal
+        TemplateSize      Self.Width / Max(1; varSemanas)
+        TemplatePadding   0
+        ShowScrollbar     false
+        Height            20
+        FillPortions      0
+        AlignInContainer  AlignInContainer.Stretch
+
+        Dentro, una sola etiqueta:
+
+        lblWN          Etiqueta
+            Text            ThisItem.WN
+            X 0   Y 0
+            Width           Parent.TemplateWidth
+            Height          20
+            Align           Align.Center
+            Size            7
+            FontWeight      FontWeight.Semibold
+            Color           RGBA(18; 18; 14; 1)
+            PaddingLeft 0   PaddingRight 0
+            BorderStyle     BorderStyle.Solid
+            BorderThickness 1
+            BorderColor     RGBA(242; 241; 236; 1)
+
+------------------------------------------------------------------------------
+  C.3  conFila  -  la fila del invernadero
+------------------------------------------------------------------------------
+galTimeline
+    TemplateSize      30
+    TemplatePadding   0
+
+conFila   (el que era Container2)
+    LayoutMode        LayoutMode.Manual   <- dejarlo manual NO, ver nota
+    Variant           cambiar a contenedor de DISENO horizontal
+    LayoutDirection   LayoutDirection.Horizontal
+    LayoutAlignItems  LayoutAlignItems.Stretch
+    Width             Parent.TemplateWidth
+    Height            Parent.TemplateHeight
+    Padding (los cuatro)  0
+
+NOTA: ya no hace falta modo manual. Como el boton ya no va encima del HTML
+sino que cada celda ES un boton, el contenedor vuelve a ser de diseno normal.
+
+Hijos en este orden:
+
+lblCod       Width 110   FillPortions 0   Text ThisItem.Cod
+lblCap       Width 68    FillPortions 0   Text Text(ThisItem.Cap; "#,##0")
+
+galCeldas    GALERIA NUEVA, horizontal
+    Items             colSemanas
+    Layout            Layout.Horizontal
+    TemplateSize      Self.Width / Max(1; varSemanas)
+    TemplatePadding   0
+    ShowScrollbar     false
+    FillPortions      1
+    AlignInContainer  AlignInContainer.Stretch
+    DelayItemLoading  false
+
+    Dentro, un solo boton:
+
+    btnCelda     Boton
+        X 0   Y 0
+        Width            Parent.TemplateWidth
+        Height           Parent.TemplateHeight
+        Text             ""
+        BorderStyle      BorderStyle.Solid
+        BorderThickness  1
+        BorderColor      RGBA(240; 239; 236; 1)
+        RadiusTopLeft / TopRight / BottomLeft / BottomRight    0
+        Color            RGBA(255; 255; 255; 1)
+        FocusedBorderThickness   1
+
+        Fill
+            With({c: First(Filter(colCiclos;
+                        Inv = lblCod.Text
+                        && FechaTrasplante <= ThisItem.Fin
+                        && FechaFin >= ThisItem.Ini))};
+                If(!IsBlank(c.Lote);
+                    ColorValue(c.Hex);
+                   CountRows(Filter(colCiclos;
+                        Inv = lblCod.Text
+                        && FechaFin < ThisItem.Ini
+                        && FechaLibre >= ThisItem.Ini)) > 0;
+                    RGBA(230; 230; 221; 1);
+                   LookUp(colInv; Cod = lblCod.Text).Disp > ThisItem.Fin;
+                    RGBA(185; 184; 172; 1);
+                    RGBA(253; 253; 251; 1)))
+
+        HoverFill
+            With({c: First(Filter(colCiclos;
+                        Inv = lblCod.Text
+                        && FechaTrasplante <= ThisItem.Fin
+                        && FechaFin >= ThisItem.Ini))};
+                If(!IsBlank(c.Lote);
+                    ColorFade(ColorValue(c.Hex); 0,25);
+                    RGBA(44; 122; 93; 0,10)))
+
+        PressedFill      Self.HoverFill
+
+        OnSelect
+            With({c: First(Filter(colCiclos;
+                        Inv = lblCod.Text
+                        && FechaTrasplante <= ThisItem.Fin
+                        && FechaFin >= ThisItem.Ini))};
+                If(!IsBlank(c.Lote);
+                    Set(varInvSel; c.Inv);;
+                    Set(varLoteVer; c.Lote)))
+
+        Tooltip
+            With({c: First(Filter(colCiclos;
+                        Inv = lblCod.Text
+                        && FechaTrasplante <= ThisItem.Fin
+                        && FechaFin >= ThisItem.Ini))};
+                If(IsBlank(c.Lote);
+                    "W" & ThisItem.WN & "  -  free";
+                    c.ES & "  " & Text(c.Plantas; "#,##0") & " / " &
+                    Text(c.Cap; "#,##0") & " pl" & Char(10) &
+                    Text(c.FechaTrasplante; "dd/mm/yyyy") & "  ->  " &
+                    Text(c.FechaFin; "dd/mm/yyyy")))
+
+COMO FUNCIONA EL CLIC
+    Cada celda conoce su semana (ThisItem.Ini y ThisItem.Fin) y su invernadero
+    (lblCod.Text, que es la etiqueta hermana de la misma fila). Con esos dos
+    datos encuentra el ciclo exacto que ocupa esa celda y fija varLoteVer con
+    ese lote. El popup abre directo en el ciclo que tocaste, no en el primero
+    de la casa.
+
+    Si una casa tiene tres ciclos, tocas el primero y ves sus VCR; tocas el
+    tercero y ves los del tercero. Es el comportamiento del prototipo.
+
+POR QUE ALINEA PERFECTO
+    galReglaSem y galCeldas usan el mismo Items (colSemanas) y el mismo
+    TemplateSize (Self.Width dividido varSemanas). Como lblCod y lblCap miden
+    110 y 68 en las dos zonas, las dos galerias arrancan en el mismo pixel y
+    cada celda queda exactamente bajo su numero de semana.
+
+------------------------------------------------------------------------------
+  C.4  RENDIMIENTO
+------------------------------------------------------------------------------
+Son 74 celdas por fila. Power Apps solo dibuja las filas visibles, asi que en
+pantalla hay unas 10 filas x 74 = 740 botones. Va bien, pero:
+
+    galTimeline . DelayItemLoading    false
+    galTimeline . ShowScrollbar       true
+    galCeldas . DelayItemLoading      false
+
+Si notas lentitud, sube galTimeline.TemplateSize a 34 y baja varSemanas
+mostrando solo 12 meses en vez de 17.
+
+
+==============================================================================
+  D. LIMPIEZA PENDIENTE
+==============================================================================
+conCulHdr contiene inpSem_1, inpCiclo_1 e inpVent_1: son entradas de texto
+copiadas de la fila. Un encabezado no lleva entradas.
+
+    ELIMINAR   inpSem_1   inpCiclo_1   inpVent_1
+    AGREGAR    tres etiquetas en su lugar:
+               lblCulHdrSem   Text "Nursery days"      Width 80
+               lblCulHdrCic   Text "Greenhouse days"   Width 80
+               lblCulHdrVen   Text "Window"            Width 80
+    Y en las tres que quedan:
+               lblCultivo1_1    Text "Crop"            Width 200
+               lblCicloTotal_1  Text "Total cycle"     Width 130
+               lblCiclosAnio_1  Text "Cycles per year" FillPortions 1
