@@ -1,0 +1,1324 @@
+==============================================================================
+PLANIFICADOR DE INVERNADEROS - REVISION DEL SISTEMA (9 PUNTOS)
+Revision hecha sobre el YAML actual de scrPlan + el OnStart actual
+Sintaxis Power Fx es-GT:  ;  separa argumentos   ;;  encadena   coma decimal
+Solo se listan los controles y propiedades que HAY QUE CAMBIAR.
+==============================================================================
+
+INDICE
+  PARTE 0  3 fallas criticas que rompen todo lo demas (leer primero)
+  PUNTO 1  drpSitio por defecto Salama Station
+  PUNTO 2  conKPI capacidad instalada + KPI por familia
+  PUNTO 3  htmlOcup a la escala y alineacion de htmlRegla
+  PUNTO 4  drpBloque todos por defecto + seleccion multiple
+  PUNTO 5  drpCultivoTL en ingles
+  PUNTO 6  galInv donde se guarda de verdad + parametros sin OnStart
+  PUNTO 7  conVCR como funciona + estatus + filtros + clic de fila
+  PUNTO 8  conASG para que sirve + filtros + scroll
+  PUNTO 9  conCtrl flujo completo de asignacion
+  ANEXO A  Listas de SharePoint nuevas / columnas nuevas
+  ANEXO B  Orden correcto del OnStart
+
+
+==============================================================================
+PARTE 0 - TRES FALLAS CRITICAS
+==============================================================================
+
+0.1  NOMBRE DE COLUMNA EQUIVOCADO EN colCiclos Y colAsign  (rompe el plan)
+-----------------------------------------------------------------------------
+En tu OnStart actual sembraste los esquemas asi:
+
+     colCiclos ... FechaTransplant:varIniPlan ...
+     colAsign  ... Transplant:varIniPlan ...
+
+Pero las 40 formulas del resto de la pantalla (btnAuto, btnKPI, btnGuardar,
+galCeldas, galAsign, htmlFila, htmlUso, galLotes, conDetalle, drpMover,
+btnAsignarManual) leen  FechaTrasplante  y  Trasplante .
+
+Un Clear() NO borra el esquema: la coleccion queda con la columna del
+sembrado. Entonces el primer Collect de btnAuto intenta agregar
+FechaTrasplante a una tabla que ya tiene FechaTransplant y el motor crea un
+conflicto de esquema: colCiclos nunca se llena. Resultado: timeline vacio,
+colOcup vacio, htmlOcup sin barras, KPI en cero.
+
+Control:   App
+Propiedad: OnStart
+Accion:    corregir SOLO estas dos lineas del bloque de sembrado
+
+ANTES
+ClearCollect(colCiclos;
+{Lote:"";Inv:"";Tipo:"";Cultivo:"";ES:"";FechaTransplant:varIniPlan;FechaFin:varIniPlan;
+FechaLibre:varIniPlan;Cap:0;Plantas:0;Origen:"";Hex:""});;
+
+DESPUES
+ClearCollect(colCiclos;
+    {Lote:"";Inv:"";Tipo:"";Cultivo:"";ES:"";FechaTrasplante:varIniPlan;FechaFin:varIniPlan;
+     FechaLibre:varIniPlan;Cap:0;Plantas:0;Origen:"";Hex:""});;
+
+ANTES
+ClearCollect(colAsign;
+{Lote:"";VCRID:0;Nombre:"";Cultivo:"";ES:"";Inv:"";Plantas:0;Siembra:varIniPlan;
+Transplant:varIniPlan;Fin:varIniPlan;Estado:"";Origen:"";Hex:""});;
+
+DESPUES
+ClearCollect(colAsign;
+    {Lote:"";VCRID:0;Nombre:"";Cultivo:"";ES:"";Inv:"";Plantas:0;Siembra:varIniPlan;
+     Trasplante:varIniPlan;Fin:varIniPlan;Estado:"";Origen:"";Hex:""});;
+
+Nota: NO cambies las formulas de los controles. El nombre correcto es el que
+ya usan los controles: FechaTrasplante y Trasplante.
+
+
+0.2  colOpcInvAsg SE CONSTRUYE ANTES QUE colInv  (drpAsgInv sale vacio)
+-----------------------------------------------------------------------------
+En el OnStart actual, lineas 33-34:
+
+     ClearCollect(colOpcInvAsg; {Cod:""; Nom:"All greenhouses"});;
+     Collect(colOpcInvAsg; ForAll(colInv As G; {Cod:G.Cod; Nom:G.Cod}));;
+
+colInv todavia no existe en ese punto (se crea 20 lineas mas abajo). El
+ForAll recorre una tabla vacia, asi que drpAsgInv solo muestra
+"All greenhouses" y el filtro de conASG por invernadero nunca funciona.
+
+Control:   App
+Propiedad: OnStart
+Accion:    BORRAR esas dos lineas de donde estan y volverlas a poner
+           DESPUES de  Set(varCapTotal; Sum(colInv; Cap));;
+           (ver ANEXO B para el orden completo)
+
+
+0.3  Area x Densidad NO DA LA CAPACIDAD REAL  (inpDens_1 / inpDens la destruyen)
+-----------------------------------------------------------------------------
+Revise las 34 casas del catalogo. En 30 de ellas Area x Dens no coincide con
+Cap. Ejemplos:
+
+     GH 1    2.213,76 x 1,8 = 3.985   pero Cap = 6.384
+     GH 2    3.110,40 x 1,8 = 5.599   pero Cap = 7.920
+     GH 5      227,32 x 1,8 =   409   pero Cap = 5.832   <- area con error de dedo
+     P1      2.100,00 x 2,8 = 5.880   pero Cap = 2.500
+
+El problema practico: inpDens_1 (Area) y inpDens (Densidad) RECALCULAN Cap en
+su OnChange. El dia que toques el area de GH 2 para corregirla, la capacidad
+se cae de 7.920 a 5.599 y el plan completo cambia.
+
+Tienes dos salidas; elige una:
+
+OPCION A (recomendada mientras no depures areas): que Area y Densidad sean
+informativas y Cap sea el dato maestro.
+
+Control:   inpDens_1   (TextInput, dentro de conInvFila en galInv)
+Propiedad: OnChange
+Formula:
+=Patch(colInv; LookUp(colInv; Cod = ThisItem.Cod); {Area: Value(Self.Text)});;
+ Patch(PLN_INVERNADEROS; LookUp(PLN_INVERNADEROS; Codigo = ThisItem.Cod);
+     {AreaM2: Value(Self.Text)})
+
+Control:   inpDens   (TextInput, dentro de conInvFila en galInv)
+Propiedad: OnChange
+Formula:
+=Patch(colInv; LookUp(colInv; Cod = ThisItem.Cod); {Dens: Value(Self.Text)});;
+ Patch(PLN_INVERNADEROS; LookUp(PLN_INVERNADEROS; Codigo = ThisItem.Cod);
+     {DensidadPlM2: Value(Self.Text)})
+
+OPCION B: corriges las areas en el catalogo para que Area x Dens = Cap y
+dejas los OnChange como estan. Si eliges B, corrige primero GH 5
+(227,32 -> 3.240) y P1..P6 (densidad real 1,19 no 2,8).
+
+En ambos casos inpCap pasa a ser la fuente de verdad:
+
+Control:   inpCap   (TextInput, dentro de conInvFila en galInv)
+Propiedad: OnChange
+Formula:
+=Patch(colInv; LookUp(colInv; Cod = ThisItem.Cod); {Cap: Value(Self.Text)});;
+ Patch(PLN_INVERNADEROS; LookUp(PLN_INVERNADEROS; Codigo = ThisItem.Cod);
+     {CapacidadPlantas: Value(Self.Text)});;
+ Set(varCapTotal; Sum(colInv; Cap));;
+ Select(btnAuto)
+
+
+==============================================================================
+PUNTO 1 - drpSitio POR DEFECTO SALAMA STATION
+==============================================================================
+
+Control:    drpSitio
+Tipo:       ModernCombobox
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  DefaultSelectedItems       (NUEVA - hoy no existe)
+Formula:
+=Table({Sitio: "Salama Station"})
+
+Control:    drpSitio
+Propiedad:  SelectMultiple
+Formula:
+=false
+
+Con esto varSitio ya arranca con valor desde OnStart (ya lo tienes:
+Set(varSitio; "Salama Station")) y el combobox lo muestra en pantalla.
+
+
+==============================================================================
+PUNTO 2 - conKPI: CAPACIDAD INSTALADA Y KPI POR FAMILIA
+==============================================================================
+
+RESPUESTA A TU PREGUNTA
+-----------------------------------------------------------------------------
+Si, varCapTotal = Sum(colInv; Cap) es la suma de las 34 casas del catalogo.
+Sume las capacidades a mano y da:
+
+     CAPACIDAD INSTALADA TOTAL .......... 159.980 plantas
+       Cucurbits (GH 1-8, GH 20-24, N1, N2, N8, N9) ....  81.615
+       Solanaceae (GH 9-19, P1-P6) .....................  78.365
+     DEMANDA 2026 (186 VCR activos) ..... 136.164 plantas
+
+Ese 159.980 es capacidad INSTANTANEA (lo que cabe al mismo tiempo). No se
+compara contra 136.164 directamente, porque la demanda se reparte en 74
+semanas y una casa se reutiliza 2 o 3 veces en la temporada. Por eso el KPI
+de utilizacion se calcula en planta-semana y el KPI por familia lo calculo
+sobre el PICO: la semana en la que mas plantas de esa familia estan dentro
+de los invernaderos al mismo tiempo. Eso si es comparable contra la
+capacidad instalada de la familia.
+
+La familia la deduzco de la columna Cultivos del catalogo, no necesito
+agregar columnas:
+     Find(";Melon;"; Cultivos)  > 0  ->  casa de Cucurbits
+     Find(";Tomato;"; Cultivos) > 0  ->  casa de Solanaceae  (incluye P1-P6)
+
+-----------------------------------------------------------------------------
+Control:    btnKPI
+Tipo:       Classic/Button  (Visible = false, es el motor de KPIs)
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR COMPLETO
+Formula:
+
+=ClearCollect(colOcup;
+    ForAll(colSemanas As S;
+        {Sem:     S.Sem;
+         Ini:     S.Ini;
+         Plantas: Sum(Filter(colCiclos;
+                      FechaTrasplante <= S.Fin && FechaFin >= S.Ini); Plantas);
+         Casas:   CountRows(Filter(colCiclos;
+                      FechaTrasplante <= S.Fin && FechaFin >= S.Ini))}));;
+
+ClearCollect(colOcupFam;
+    ForAll(colSemanas As S;
+        {Sem: S.Sem;
+         Cuc: Sum(Filter(colCiclos;
+                  Find(";" & Cultivo & ";"; varRegCuc) > 0
+                  && FechaTrasplante <= S.Fin && FechaFin >= S.Ini); Plantas);
+         Sol: Sum(Filter(colCiclos;
+                  Find(";" & Cultivo & ";"; varRegSol) > 0
+                  && FechaTrasplante <= S.Fin && FechaFin >= S.Ini); Plantas)}));;
+
+Set(varCapTotal; Sum(colInv; Cap));;
+Set(varCapCuc;   Sum(Filter(colInv; Find(";Melon;";  Cultivos) > 0); Cap));;
+Set(varCapSol;   Sum(Filter(colInv; Find(";Tomato;"; Cultivos) > 0); Cap));;
+Set(varUsoCuc;   Coalesce(Max(colOcupFam; Cuc); 0));;
+Set(varUsoSol;   Coalesce(Max(colOcupFam; Sol); 0));;
+
+Set(varPedido;   Sum(colVCR; Plantas));;
+Set(varColocado; Sum(Filter(colAsign; Estado <> "Sin cupo"); Plantas));;
+Set(varSinCupo;  Sum(Filter(colAsign; Estado =  "Sin cupo"); Plantas));;
+Set(varAtrasados;
+    CountRows(Filter(ForAll(colVCR As V;
+        {n: CountRows(Filter(colAsign; VCRID = V.VCRID && Estado = "Atrasado"))}); n > 0)));;
+Set(varPartidos;
+    CountRows(Filter(ForAll(colVCR As V;
+        {n: CountRows(Filter(colAsign; VCRID = V.VCRID && Estado <> "Sin cupo"))}); n > 1)));;
+Set(varUtil;
+    Sum(ForAll(colCiclos As C;
+        {v: C.Plantas * DateDiff(C.FechaTrasplante; C.FechaFin; TimeUnit.Days)/7}); v)
+    / Max(1; varCapTotal * varSemanas) * 100);;
+
+ClearCollect(colKPI;
+    {Orden:1; Lab:"Plants requested";
+     Val: Text(varPedido; "#,##0");
+     Sub: CountRows(colVCR) & " active VCR"; Alerta:"n"};
+    {Orden:2; Lab:"Plants placed";
+     Val: Text(varColocado; "#,##0");
+     Sub: Text(varColocado / Max(1; varPedido); "[$-en-US]0%") & " of demand";
+     Alerta: If(varColocado >= varPedido; "ok"; "n")};
+    {Orden:3; Lab:"No space in horizon";
+     Val: Text(varSinCupo; "#,##0");
+     Sub: If(varSinCupo > 0; "Needs extra greenhouse"; "All demand fits");
+     Alerta: If(varSinCupo > 0; "mal"; "ok")};
+    {Orden:4; Lab:"Cycles scheduled";
+     Val: Text(CountRows(colCiclos); "#,##0");
+     Sub: varPartidos & " VCR split between houses"; Alerta:"n"};
+    {Orden:5; Lab:"Installed capacity";
+     Val: Text(varCapTotal; "#,##0");
+     Sub: CountRows(colInv) & " greenhouses"; Alerta:"n"};
+    {Orden:6; Lab:"Capacity utilization";
+     Val: Text(varUtil; "[$-en-US]0") & "%";
+     Sub: "plant-weeks over " & varSemanas & " weeks"; Alerta:"n"};
+    {Orden:7; Lab:"Cucurbits capacity";
+     Val: Text(varCapCuc; "#,##0");
+     Sub: "peak used " & Text(varUsoCuc; "#,##0") & " pl"; Alerta:"n"};
+    {Orden:8; Lab:"Cucurbits available";
+     Val: Text(varCapCuc - varUsoCuc; "#,##0");
+     Sub: Text(varUsoCuc / Max(1; varCapCuc); "[$-en-US]0%") & " used at peak";
+     Alerta: If(varUsoCuc > varCapCuc; "mal"; "ok")};
+    {Orden:9; Lab:"Solanaceae capacity";
+     Val: Text(varCapSol; "#,##0");
+     Sub: "peak used " & Text(varUsoSol; "#,##0") & " pl"; Alerta:"n"};
+    {Orden:10; Lab:"Solanaceae available";
+     Val: Text(varCapSol - varUsoSol; "#,##0");
+     Sub: Text(varUsoSol / Max(1; varCapSol); "[$-en-US]0%") & " used at peak";
+     Alerta: If(varUsoSol > varCapSol; "mal"; "ok")})
+
+-----------------------------------------------------------------------------
+Control:    galKPI
+Tipo:       Gallery (horizontal)
+Ubicacion:  conApp > conKPI
+Propiedad:  Items
+Formula:
+=SortByColumns(colKPI; "Orden"; SortOrder.Ascending)
+
+Control:    galKPI
+Propiedad:  ShowScrollbar
+Formula:
+=true
+
+Control:    galKPI
+Propiedad:  TemplateSize
+Formula:
+=205
+
+(10 tarjetas de 205 px: se ven 6 o 7 y las demas con scroll horizontal.
+ Si prefieres ver las 10 sin scroll, baja TemplateSize a 150 y conKPI.Height
+ a 110, pero el texto del Sub se corta.)
+
+-----------------------------------------------------------------------------
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR estas 5 lineas junto a los otros Set de arranque
+Formula:
+Set(varCapCuc; 0);;
+Set(varCapSol; 0);;
+Set(varUsoCuc; 0);;
+Set(varUsoSol; 0);;
+ClearCollect(colOcupFam; {Sem:0;Cuc:0;Sol:0});; Clear(colOcupFam);;
+
+
+==============================================================================
+PUNTO 3 - htmlOcup A LA ESCALA Y ALINEACION DE htmlRegla
+==============================================================================
+
+POR QUE HOY NO COINCIDE
+-----------------------------------------------------------------------------
+1) htmlRegla reparte el ancho en varSemanas celdas de  100/varSemanas %  con
+   flex-grow:1 y flex-basis:0. htmlOcup recorre colOcup y usa flex:1 1 0 SIN
+   porcentaje: si colOcup tiene menos filas que varSemanas (o esta vacio por
+   la falla 0.1), las barras se estiran y dejan de coincidir con la regla.
+2) htmlOcup concatena numeros crudos:  (Min(112; Plantas/varCapTotal*112))
+   En es-GT eso escribe  "34,56px"  y el CSS lo ignora: la barra sale con
+   altura 0 o al 100%. Hay que forzar el punto con Text(...; "[$-en-US]0.##").
+3) lblOcupLab ya mide 178 (110 + 68 = igual que lblReglaCap + Label1_1), eso
+   esta bien y no se toca.
+
+-----------------------------------------------------------------------------
+Control:    htmlOcup
+Tipo:       HtmlViewer
+Ubicacion:  conApp > conBody > conTL > conOcup
+Propiedad:  HtmlText
+Accion:     REEMPLAZAR COMPLETO
+Formula:
+
+="<div style='width:100%;font-family:Segoe UI,sans-serif;'>" &
+"<div style='height:14px;line-height:14px;font-size:9px;font-weight:600;" &
+"color:#84837a;'>" & Text(varCapTotal; "[$-en-US]#,##0") & " pl installed</div>" &
+"<div style='display:flex;justify-content:space-between;width:100%;height:110px;" &
+"box-sizing:border-box;background:#fdfdfb;border-top:1px dashed #c7c6ba;" &
+"border-bottom:3px solid #c7c6ba;'>" &
+Concat(colSemanas As S;
+    With({p: Coalesce(LookUp(colOcup; Sem = S.Sem).Plantas; 0)};
+        "<div style='width:" & Text(100/Max(1; varSemanas); "[$-en-US]0.#####") &
+        "%;height:110px;box-sizing:border-box;flex-grow:1;flex-basis:0;" &
+        "border-left:1px solid " & If(Day(S.Ini) <= 7; "#c7c6ba"; "#f2f1ec") &
+        ";display:flex;align-items:flex-end;justify-content:center;'>" &
+        "<div style='width:82%;height:" &
+        Text(Min(110; p / Max(1; varCapTotal) * 110); "[$-en-US]0.##") &
+        "px;background:#2a78d6;border-radius:2px 2px 0 0;'></div></div>")) &
+"</div></div>"
+
+Control:    htmlOcup
+Propiedad:  Height
+Formula:
+=128
+
+Control:    conOcup
+Tipo:       GroupContainer (AutoLayout horizontal)
+Ubicacion:  conApp > conBody > conTL
+Propiedad:  Height
+Formula:
+=132
+
+Control:    conOcup
+Propiedad:  LayoutMinHeight
+Formula:
+=132
+
+Control:    lblOcupLab
+Tipo:       Label
+Ubicacion:  conApp > conBody > conTL > conOcup
+Propiedad:  Text
+Formula:
+="Plants in greenhouse" & Char(10) & "peak " &
+ Text(Coalesce(Max(colOcup; Plantas); 0); "#,##0") & " pl"
+
+Con esto htmlOcup usa exactamente el mismo modelo de ancho que htmlRegla
+(porcentaje por semana + la misma linea de mes cada dia <= 7), empieza en el
+mismo pixel 178 y queda alineado columna por columna.
+
+
+==============================================================================
+PUNTO 4 - drpBloque: TODOS POR DEFECTO + SELECCION MULTIPLE
+==============================================================================
+
+Control:    drpBloque
+Tipo:       ModernCombobox
+Ubicacion:  conApp > conBody > conTL > conFiltrosTL
+Propiedad:  SelectMultiple        (NUEVA)
+Formula:
+=true
+
+Control:    drpBloque
+Propiedad:  DefaultSelectedItems  (NUEVA)
+Formula:
+=Table({Bloque: ""; Nom: "All blocks"})
+
+Control:    drpBloque
+Propiedad:  OnChange
+Accion:     REEMPLAZAR
+Formula:
+=ClearCollect(colFBloque; ForAll(Self.SelectedItems As B; {Bloque: B.Bloque}))
+
+Control:    drpBloque
+Propiedad:  InputTextPlaceholder
+Formula:
+="All blocks"
+
+-----------------------------------------------------------------------------
+Control:    galTimeline
+Tipo:       Gallery (vertical)
+Ubicacion:  conApp > conBody > conTL
+Propiedad:  Items
+Accion:     REEMPLAZAR
+Formula:
+=Filter(colInv As G;
+    CountRows(colFBloque) = 0
+    || !IsBlank(LookUp(colFBloque; Bloque = ""))
+    || !IsBlank(LookUp(colFBloque; Bloque = G.Bloque)))
+
+Logica: si no hay nada marcado, o si esta marcado "All blocks" (Bloque = ""),
+se ven las 34 casas. Si marcas GH 1-8 y GH 20-24, solo esos dos bloques.
+
+-----------------------------------------------------------------------------
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR (reemplaza el uso de varFBloque, que queda sin uso)
+Formula:
+ClearCollect(colFBloque; {Bloque: ""});;
+
+Esta linea debe ir DESPUES de ClearCollect(colOpcBloque; ...).
+
+
+==============================================================================
+PUNTO 5 - drpCultivoTL EN INGLES
+==============================================================================
+
+La causa: colOpcCultivo se arma con  Nom: C.ES  (columna en espanol) y la
+primera fila dice "Todos". El combobox muestra ItemDisplayText = ThisItem.Nom.
+
+Control:    App
+Propiedad:  OnStart
+Accion:     REEMPLAZAR estas dos lineas
+ANTES
+ClearCollect(colOpcCultivo; {Cultivo:"";Nom:"Todos"});;
+Collect(colOpcCultivo; ForAll(colCultivos As C; {Cultivo:C.Cultivo; Nom:C.ES}));;
+DESPUES
+ClearCollect(colOpcCultivo; {Cultivo:""; Nom:"All crops"});;
+Collect(colOpcCultivo; ForAll(colCultivos As C; {Cultivo:C.Cultivo; Nom:C.Cultivo}));;
+
+Control:    App
+Propiedad:  OnStart
+Accion:     REEMPLAZAR colOpcCriterio (tambien estaba en espanol)
+Formula:
+ClearCollect(colOpcCriterio;
+    {Modo:"vent";  Nom:"Shared planting window"};
+    {Modo:"early"; Nom:"Same earliest start"});;
+
+Control:    App
+Propiedad:  OnStart
+Accion:     REEMPLAZAR colLeyenda (los dias no coincidian con colCultivos:
+            decia Pepper 130, Watermelon 100, Cucumber 95)
+Formula:
+ClearCollect(colLeyenda;
+    ForAll(colCultivos As C;
+        {Nom: C.Cultivo; Dias: C.Ciclo & " d"; Hex: C.Hex}));;
+Collect(colLeyenda;
+    {Nom:"Cleaning window"; Dias:""; Hex:"#e6e6dd"};
+    {Nom:"In production";   Dias:""; Hex:"#b9b8ac"});;
+
+Asi la leyenda siempre refleja los dias reales del parametro y nunca se
+desincroniza otra vez.
+
+Control:    drpCultivoTL
+Tipo:       ModernCombobox
+Ubicacion:  conApp > conBody > conTL > conFiltrosTL
+Propiedad:  DefaultSelectedItems   (NUEVA)
+Formula:
+=Table({Cultivo: ""; Nom: "All crops"})
+
+Control:    drpCultivoTL
+Propiedad:  InputTextPlaceholder
+Formula:
+="All crops"
+
+
+==============================================================================
+PUNTO 6 - galInv: DONDE SE ACTUALIZA DE VERDAD
+==============================================================================
+
+POR QUE SE TE PIERDE LA FECHA
+-----------------------------------------------------------------------------
+Hoy colInv NACE ESCRITA A MANO en OnStart (las 34 filas con
+Disp:varIniPlan). galInv.Items = colInv, es decir una coleccion en memoria.
+dtpDisp hace dos Patch: uno a colInv (memoria) y otro a PLN_INVERNADEROS
+(SharePoint). El Patch a SharePoint SI guarda, pero cuando refrescas el
+navegador OnStart vuelve a correr y vuelve a escribir las 34 filas a mano,
+encima de lo guardado. Por eso ves el dato "regresado".
+
+La solucion es invertir el flujo: el catalogo escrito a mano se usa UNA sola
+vez para sembrar la lista, y de ahi en adelante colInv se LEE de SharePoint.
+
+-----------------------------------------------------------------------------
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR este bloque INMEDIATAMENTE DESPUES del
+            ClearCollect(colInv; {Cod:"GH 1"...});;  que ya tienes
+            (no borres el catalogo escrito a mano: es la semilla)
+Formula:
+
+ClearCollect(colInvSp; PLN_INVERNADEROS);;
+If(CountRows(colInvSp) = 0;
+    ForAll(colInv As G;
+        Patch(PLN_INVERNADEROS; Defaults(PLN_INVERNADEROS);
+            {Title:              G.Cod;
+             Codigo:             G.Cod;
+             Bloque:             G.Bloque;
+             CultivosPermitidos: G.Cultivos;
+             AreaM2:             G.Area;
+             DensidadPlM2:       G.Dens;
+             CapacidadPlantas:   G.Cap;
+             DisponibleDesde:    G.Disp;
+             Activo:             true;
+             Orden:              G.Orden})));;
+ClearCollect(colInvSp; PLN_INVERNADEROS);;
+ClearCollect(colInv;
+    SortByColumns(
+        ForAll(Filter(colInvSp; Activo = true) As G;
+            {Cod:      G.Codigo;
+             Bloque:   G.Bloque;
+             Tipo:     "Transplant";
+             Cultivos: G.CultivosPermitidos;
+             Area:     G.AreaM2;
+             Dens:     G.DensidadPlM2;
+             Cap:      G.CapacidadPlantas;
+             Disp:     G.DisponibleDesde;
+             Orden:    G.Orden});
+        "Orden"; SortOrder.Ascending));;
+Set(varCapTotal; Sum(colInv; Cap));;
+
+Importante: la columna Tipo en PLN_Invernaderos es de tipo Eleccion; para no
+pelear con el formato de Eleccion la fijo en texto "Transplant", que es lo
+que tienen las 34 casas hoy. Si algun dia necesitas casas de siembra directa,
+cambialo a  Tipo: G.Tipo.Value  y en la lista deja las opciones
+Direct / Transplant escritas asi, en ingles.
+
+-----------------------------------------------------------------------------
+Control:    dtpDisp
+Tipo:       ModernDatePicker
+Ubicacion:  conApp > conBody > conINV > galInv > conInvFila
+Propiedad:  OnChange
+Accion:     REEMPLAZAR (agrego Refresh para que el dato sobreviva al F5)
+Formula:
+=Patch(colInv; LookUp(colInv; Cod = ThisItem.Cod); {Disp: Self.SelectedDate});;
+ Patch(PLN_INVERNADEROS; LookUp(PLN_INVERNADEROS; Codigo = ThisItem.Cod);
+     {DisponibleDesde: Self.SelectedDate});;
+ Select(btnAuto)
+
+(ya no hace falta Refresh: colInv se arma de la lista en el siguiente arranque)
+
+-----------------------------------------------------------------------------
+QUE PASA CON "Available" CUANDO YA TRASPLANTASTE
+-----------------------------------------------------------------------------
+Tu pregunta era: al trasplantar en ese invernadero, esa fecha se deberia ir
+actualizando. OJO: NO conviene que el motor sobreescriba Disp, porque Disp es
+el DATO DE ENTRADA (desde cuando la casa queda libre por razones reales:
+produccion actual, mantenimiento). Si el motor lo sobreescribe, cada vez que
+recalculas el plan la casa arranca mas tarde y el plan se va corriendo solo,
+sin que nadie lo pida.
+
+Lo correcto es mostrar DOS fechas: Available (entrada, editable) y Next free
+(salida, calculada). El motor ya lleva la fecha calculada en colLibre.
+
+Control:    lblProxLibre               <- CONTROL NUEVO
+Tipo:       Label
+Ubicacion:  conApp > conBody > conINV > galInv > conInvFila
+            (insertar justo despues de dtpDisp, antes de lblCiclos)
+Propiedades a fijar:
+   Text        =Text(Coalesce(LookUp(colLibre; Cod = ThisItem.Cod).Libre;
+                              ThisItem.Disp); "dd/mm/yyyy")
+   Width       =110
+   Size        =11
+   Align       =Align.Center
+   Color       =RGBA(50; 49; 48; 1)
+   Height      =34
+   BorderStyle =BorderStyle.None
+
+Control:    lblHdrProxLibre            <- CONTROL NUEVO
+Tipo:       Label
+Ubicacion:  conApp > conBody > conINV > conInvHdr
+            (insertar justo despues de lblHdrDisp)
+Propiedades a fijar:
+   Text        ="Next free"
+   Width       =110
+   Size        =11
+   Align       =Align.Center
+   FontWeight  =FontWeight.Semibold
+   BorderStyle =BorderStyle.None
+
+-----------------------------------------------------------------------------
+PARAMETROS SIN ENTRAR A OnStart
+-----------------------------------------------------------------------------
+Los parametros de cultivo (Semillero / Ciclo / Ventana) YA son editables en
+la pestana Parameters: galCultivos tiene inpSem, inpCiclo e inpVent y los
+tres hacen Patch a colCultivos y Select(btnRecalcular). Lo que falta es que
+sobrevivan al refresco: hay que leerlos de una lista. Mismo patron que las
+casas.
+
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR DESPUES del ClearCollect(colCultivos; ...) escrito a mano
+Formula:
+ClearCollect(colParSp; PLN_Parametros);;
+If(CountRows(colParSp) = 0;
+    ForAll(colCultivos As C;
+        Patch(PLN_Parametros; Defaults(PLN_Parametros);
+            {Title: C.Cultivo; Cultivo: C.Cultivo; NombreES: C.ES; Familia: C.Familia;
+             DiasSemillero: C.Semillero; DiasCiclo: C.Ciclo; DiasVentana: C.Ventana;
+             ColorHex: C.Hex})));;
+ClearCollect(colParSp; PLN_Parametros);;
+ClearCollect(colCultivos;
+    ForAll(colParSp As C;
+        {Cultivo: C.Cultivo; ES: C.NombreES; Familia: C.Familia;
+         Semillero: C.DiasSemillero; Ciclo: C.DiasCiclo; Ventana: C.DiasVentana;
+         Hex: C.ColorHex}));;
+
+Control:    inpSem
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conBody > conPAR > galCultivos > conCulFila
+Propiedad:  OnChange
+Accion:     REEMPLAZAR
+Formula:
+=Patch(colCultivos; LookUp(colCultivos; Cultivo = ThisItem.Cultivo);
+     {Semillero: Value(Self.Text)});;
+ Patch(PLN_Parametros; LookUp(PLN_Parametros; Cultivo = ThisItem.Cultivo);
+     {DiasSemillero: Value(Self.Text)});;
+ Select(btnRecalcular)
+
+Control:    inpCiclo
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conBody > conPAR > galCultivos > conCulFila
+Propiedad:  OnChange
+Accion:     REEMPLAZAR
+Formula:
+=Patch(colCultivos; LookUp(colCultivos; Cultivo = ThisItem.Cultivo);
+     {Ciclo: Value(Self.Text)});;
+ Patch(PLN_Parametros; LookUp(PLN_Parametros; Cultivo = ThisItem.Cultivo);
+     {DiasCiclo: Value(Self.Text)});;
+ Select(btnRecalcular)
+
+Control:    inpVent
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conBody > conPAR > galCultivos > conCulFila
+Propiedad:  OnChange
+Accion:     REEMPLAZAR
+Formula:
+=Patch(colCultivos; LookUp(colCultivos; Cultivo = ThisItem.Cultivo);
+     {Ventana: Value(Self.Text)});;
+ Patch(PLN_Parametros; LookUp(PLN_Parametros; Cultivo = ThisItem.Cultivo);
+     {DiasVentana: Value(Self.Text)});;
+ Select(btnRecalcular)
+
+
+==============================================================================
+PUNTO 7 - conVCR: COMO FUNCIONA Y QUE LE FALTA
+==============================================================================
+
+7.1  QUE ES CADA COSA (respuesta directa)
+-----------------------------------------------------------------------------
+conVCR es la pestana "VCR requests". Tiene tres zonas:
+
+  conGrupos      arriba. Agrupa VCR que se pueden sembrar JUNTOS en un mismo
+                 lote. No asigna nada, solo propone grupos.
+     inpProx     dias de proximidad (variable varProx, hoy 10). Dos VCR del
+                 mismo cultivo caen en el mismo grupo si el Earliest del
+                 segundo no se pasa mas de varProx dias del Latest minimo del
+                 grupo. Si pones 0, cada VCR es su propio grupo. Si pones 20,
+                 agrupa mas agresivo y llenas casas mas completas pero algunos
+                 VCR se siembran mas lejos de su fecha ideal.
+     drpCriterio criterio de agrupado: "Shared planting window" (el grupo
+                 existe si todas las fechas se traslapan) o "Same earliest
+                 start" (agrupa solo los que arrancan el mismo dia).
+     galGrupos   el resultado del agrupado. HOY ESTA CON Visible = false,
+                 por eso no ves nada.
+     Gallery1    CONTROL BASURA. Es una copia de galGrupos que quedo de un
+                 copy/paste (trae conGrupoItem_1, lblGrupo_1, Container3,
+                 btnSolo_1, btnMas_1, btnMenos_1). ELIMINAR Gallery1 completo.
+
+  conFiltrosVCR  filtros de la lista de abajo.
+  galVCR         la lista de los 186 VCR. Cada fila tiene el check (chkSel),
+                 el VCR, cultivo, plantas, ventana, asignado y estatus.
+                 Lo que marcas con el check va a colSel y es lo que usa
+                 btnAsignarManual (conManual) para asignar a mano.
+
+7.2  FALLA: drpCriterio NO HACE NADA
+-----------------------------------------------------------------------------
+En btnAgrupar las dos ramas del If son identicas (se ordena igual por Early y
+Cultivo en ambos casos), asi que cambiar el criterio no cambia el resultado.
+
+Control:    btnAgrupar
+Tipo:       Classic/Button (Visible = false)
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR SOLO el bloque ClearCollect(colOrdG; ...)
+            (el resto del boton se queda igual)
+ANTES
+ClearCollect(colOrdG;
+    If(varGBase = "early";
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending);
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending)));;
+DESPUES
+ClearCollect(colOrdG;
+    If(varGBase = "early";
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending);
+       SortByColumns(SortByColumns(colVCR; "Last"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending)));;
+
+Con "vent" (ventana compartida) se ordena por Latest: los VCR con ventana
+mas corta entran primero al grupo, que es el comportamiento correcto para
+compartir ventana. Con "early" se ordena por Earliest.
+
+Control:    galGrupos
+Tipo:       Gallery
+Ubicacion:  conApp > conBody > conVCR > conGrupos
+Propiedad:  Visible
+Formula:
+=true
+
+Control:    Gallery1
+Accion:     ELIMINAR (clic derecho > Eliminar). Se van con el
+            conGrupoItem_1, lblGrupo_1, Container3, btnSolo_1, btnMas_1 y
+            btnMenos_1 que viven adentro.
+
+7.3  FALLA: inpProx NO MUESTRA SU VALOR
+-----------------------------------------------------------------------------
+Control:    inpProx
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conBody > conVCR > conGrupos > conGruposCtrl
+Propiedad:  Default
+Formula:
+=varProx
+
+Control:    inpProx
+Propiedad:  HintText
+Formula:
+="Grouping days"
+
+7.4  ESTATUS: QUE LOS ASIGNADOS DESAPAREZCAN DE LA LISTA
+-----------------------------------------------------------------------------
+El estatus ya se calcula en lblEstado (Pendiente / Parcial / Atrasado /
+Completo) pero esta en espanol y no filtra. Y se calcula solo: si quitas el
+ciclo de la linea de tiempo, colAsign pierde esa fila y el VCR vuelve a
+"Pending" por si mismo. No hay que guardar nada.
+
+Control:    lblEstado
+Tipo:       Label
+Ubicacion:  conApp > conBody > conVCR > galVCR > conVcrFila
+Propiedad:  Text
+Accion:     REEMPLAZAR (al ingles)
+Formula:
+=With({a: Sum(Filter(colAsign; VCRID = ThisItem.VCRID && Estado <> "Sin cupo"); Plantas)};
+    If(a = 0; "Pending";
+       CountRows(Filter(colAsign; VCRID = ThisItem.VCRID && Estado = "Atrasado")) > 0; "Late";
+       a < ThisItem.Plantas; "Partial " & Text(a/Max(1; ThisItem.Plantas); "[$-en-US]0%");
+       "Done"))
+
+Control:    lblEstado
+Propiedad:  Color
+Formula:
+=With({a: Sum(Filter(colAsign; VCRID = ThisItem.VCRID && Estado <> "Sin cupo"); Plantas)};
+    If(a = 0; RGBA(208; 59; 59; 1);
+       a < ThisItem.Plantas; RGBA(214; 139; 0; 1);
+       RGBA(12; 163; 12; 1)))
+
+Control:    drpEstadoVCR              <- CONTROL NUEVO
+Tipo:       ModernCombobox
+Ubicacion:  conApp > conBody > conVCR > conFiltrosVCR
+            (insertar como PRIMER hijo, antes de drpCultivoVCR)
+Propiedades a fijar:
+   Items                 =colOpcEstado
+   ItemDisplayText       =ThisItem.Nom
+   SelectMultiple        =false
+   DefaultSelectedItems  =Table({Est: "PEND"; Nom: "Pending only"})
+   OnChange              =Set(varFEstVCR; Self.Selected.Est)
+   Width                 =190
+   Height                =40
+
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR
+Formula:
+Set(varFEstVCR; "PEND");;
+ClearCollect(colOpcEstado;
+    {Est:"PEND"; Nom:"Pending only"};
+    {Est:"PART"; Nom:"Partial only"};
+    {Est:"DONE"; Nom:"Assigned only"};
+    {Est:"";     Nom:"All VCR"});;
+
+Control:    galVCR
+Tipo:       Gallery (vertical)
+Ubicacion:  conApp > conBody > conVCR
+Propiedad:  Items
+Accion:     REEMPLAZAR
+Formula:
+=Filter(
+    ForAll(colVCR As V;
+        {VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+         Early: V.Early; Last: V.Last; TEarly: V.TEarly; TLast: V.TLast;
+         Plantas: V.Plantas; Semillero: V.Semillero; Ciclo: V.Ciclo;
+         Ventana: V.Ventana; Hex: V.Hex; Gid: V.Gid;
+         Asignado: Sum(Filter(colAsign; VCRID = V.VCRID && Estado <> "Sin cupo"); Plantas)});
+    (varFCultivoVCR = "" || Cultivo = varFCultivoVCR)
+    && TEarly >= varVDesde
+    && TEarly <= varVHasta
+    && (varFEstVCR = ""
+        || (varFEstVCR = "PEND" && Asignado = 0)
+        || (varFEstVCR = "PART" && Asignado > 0 && Asignado < Plantas)
+        || (varFEstVCR = "DONE" && Asignado >= Plantas)))
+
+Asi, en cuanto un VCR queda asignado desaparece de la lista (con el filtro por
+defecto "Pending only"), y si lo quitas de la linea de tiempo reaparece solo.
+
+7.5  FALLA: dtpDesde Y dtpHasta NO FILTRAN
+-----------------------------------------------------------------------------
+Los dos datepicker no tienen DefaultDate ni OnChange. Nacen en blanco y
+galVCR los leia directo con IsBlank(...), asi que el filtro siempre pasaba
+todo. Los paso a variables, que es lo que entiende bien el Items de arriba.
+
+Control:    dtpDesde
+Tipo:       ModernDatePicker
+Ubicacion:  conApp > conBody > conVCR > conFiltrosVCR
+Propiedad:  DefaultDate
+Formula:
+=varIniPlan
+
+Control:    dtpDesde
+Propiedad:  OnChange
+Formula:
+=Set(varVDesde; Self.SelectedDate)
+
+Control:    dtpHasta
+Tipo:       ModernDatePicker
+Ubicacion:  conApp > conBody > conVCR > conFiltrosVCR
+Propiedad:  DefaultDate
+Formula:
+=varFinPlan
+
+Control:    dtpHasta
+Propiedad:  OnChange
+Formula:
+=Set(varVHasta; Self.SelectedDate)
+
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR
+Formula:
+Set(varVDesde; varIniPlan);;
+Set(varVHasta; varFinPlan);;
+
+7.6  FALLA: drpCultivoVCR SIN DEFAULT
+-----------------------------------------------------------------------------
+Control:    drpCultivoVCR
+Tipo:       ModernCombobox
+Ubicacion:  conApp > conBody > conVCR > conFiltrosVCR
+Propiedad:  DefaultSelectedItems   (NUEVA)
+Formula:
+=Table({Cultivo: ""; Nom: "All crops"})
+
+Control:    drpCultivoVCR
+Propiedad:  InputTextPlaceholder
+Formula:
+="All crops"
+
+7.7  CLIC EN LA FILA QUE PRENDA / APAGUE EL CHECK
+-----------------------------------------------------------------------------
+Pediste un boton oculto dentro de galVCR. No se puede: conVcrFila es
+AutoLayout y en AutoLayout los hijos NUNCA se traslapan, asi que un boton
+"encima" de la fila empujaria las etiquetas. Y un boton puesto debajo no
+recibe el clic porque las etiquetas lo tapan.
+
+La forma que si funciona es usar el OnSelect de la galeria (se dispara al
+tocar cualquier parte de la fila, etiquetas incluidas) y refrescar el check
+con un pulso de Reset. Dos propiedades, cero controles nuevos:
+
+Control:    galVCR
+Tipo:       Gallery
+Ubicacion:  conApp > conBody > conVCR
+Propiedad:  OnSelect
+Formula:
+=If(IsBlank(LookUp(colSel; VCRID = ThisItem.VCRID));
+     Collect(colSel; {VCRID: ThisItem.VCRID});
+     RemoveIf(colSel; VCRID = ThisItem.VCRID));;
+ Set(varSelTick; true);;
+ Set(varSelTick; false)
+
+Control:    chkSel
+Tipo:       Classic/CheckBox
+Ubicacion:  conApp > conBody > conVCR > galVCR > conVcrFila
+Propiedad:  Reset                   (NUEVA)
+Formula:
+=varSelTick
+
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR
+Formula:
+Set(varSelTick; false);;
+
+(chkSel.Default, OnCheck y OnUncheck se quedan como estan: ya estan bien.)
+
+7.8  TEXTOS EN INGLES EN ESTA PESTANA
+-----------------------------------------------------------------------------
+Control:    btnSelFilt   Propiedad: Text    Formula: ="Select filtered"
+Control:    btnSelNone   Propiedad: Text    Formula: ="Clear selection"
+Control:    lblResumenSel
+Propiedad:  Text
+Formula:
+=If(CountRows(colSel) = 0; "No VCR selected";
+    CountRows(colSel) & " VCR | " &
+    Concat(Distinct(ForAll(colSel As S; LookUp(colVCR; VCRID = S.VCRID)); Cultivo); Value; ", ") &
+    " | " &
+    Text(Sum(ForAll(colSel As S;
+        {p: LookUp(colVCR; VCRID = S.VCRID).Plantas -
+            Sum(Filter(colAsign; VCRID = S.VCRID && Estado <> "Sin cupo"); Plantas)}); p);
+        "#,##0") & " plants to place")
+
+
+==============================================================================
+PUNTO 8 - conASG: PARA QUE SIRVE, FILTROS Y SCROLL
+==============================================================================
+
+8.1  QUE ES
+-----------------------------------------------------------------------------
+conASG es la pestana "Assignment": el libro mayor del plan. Dos tablas:
+
+  galResumen  una fila por invernadero: cuantos lotes tiene, cuantas plantas,
+              cuantas semanas ocupadas, que cultivos y su capacidad. Sirve
+              para ver de un golpe que casa quedo floja y cual sobrecargada.
+  galAsign    el detalle: UNA FILA POR CADA VCR DENTRO DE CADA CASA. Si un
+              VCR de 3.000 plantas se partio entre GH 9 y GH 10, aqui
+              aparecen dos filas. Es lo que exportas o imprimes como plan de
+              siembra, y es lo que btnGuardar escribe a PLN_Asignacion.
+
+8.2  FALLA GRAVE: EL FILTRO DE FECHAS ARRANCA VACIANDO LA TABLA
+-----------------------------------------------------------------------------
+dtpAsgDesde.DefaultDate = varFinPlan y dtpAsgHasta.DefaultDate = varFinPlan.
+Las DOS en la misma fecha final (01/03/2027). El Items de galAsign pide
+Trasplante >= varFinPlan && Trasplante <= varFinPlan, o sea solo lo que se
+trasplanta exactamente ese dia: cero filas. Por eso la pestana se ve vacia.
+
+Control:    dtpAsgDesde
+Tipo:       ModernDatePicker
+Ubicacion:  conApp > conBody > conASG > conFiltrosASG
+Propiedad:  DefaultDate
+Formula:
+=varIniPlan
+
+Control:    dtpAsgDesde
+Propiedad:  OnChange
+Formula:
+=Set(varADesde; Self.SelectedDate)
+
+Control:    dtpAsgHasta
+Tipo:       ModernDatePicker
+Ubicacion:  conApp > conBody > conASG > conFiltrosASG
+Propiedad:  DefaultDate
+Formula:
+=varFinPlan
+
+Control:    dtpAsgHasta
+Propiedad:  OnChange
+Formula:
+=Set(varAHasta; Self.SelectedDate)
+
+Control:    galAsign
+Tipo:       Gallery (vertical)
+Ubicacion:  conApp > conBody > conASG
+Propiedad:  Items
+Accion:     REEMPLAZAR
+Formula:
+=SortByColumns(
+    SortByColumns(
+        Filter(colAsign;
+            (varFAsgInv  = "" || Inv = varFAsgInv)
+            && (varFAsgCrop = "" || Cultivo = varFAsgCrop)
+            && Trasplante >= varADesde
+            && Trasplante <= varAHasta);
+        "Inv"; SortOrder.Ascending);
+    "Trasplante"; SortOrder.Ascending)
+
+Control:    btnAsgLimpiar
+Tipo:       Classic/Button
+Ubicacion:  conApp > conBody > conASG > conFiltrosASG
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR
+Formula:
+=Set(varFAsgInv; "");;
+ Set(varFAsgCrop; "");;
+ Set(varADesde; varIniPlan);;
+ Set(varAHasta; varFinPlan);;
+ Reset(dtpAsgDesde);;
+ Reset(dtpAsgHasta);;
+ Reset(drpAsgInv);;
+ Reset(drpAsgCultivo)
+
+Control:    drpAsgInv
+Propiedad:  DefaultSelectedItems   (NUEVA)
+Formula:
+=Table({Cod: ""; Nom: "All greenhouses"})
+
+Control:    drpAsgCultivo
+Propiedad:  DefaultSelectedItems   (NUEVA)
+Formula:
+=Table({Cultivo: ""; Nom: "All crops"})
+
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR
+Formula:
+Set(varADesde; varIniPlan);;
+Set(varAHasta; varFinPlan);;
+
+8.3  EL SCROLL
+-----------------------------------------------------------------------------
+conASG es un AutoLayout vertical sin altura fija y sin LayoutOverflowY. Sus
+hijos (dos galerias) crecen con el contenido, y conBody (que si tiene
+LayoutOverflowY = Scroll) empuja todo hacia abajo. Resultado: partes que no
+se ven y un scroll que no responde. Hay que darle scroll propio a conASG y
+altura fija a cada galeria.
+
+Control:    conASG
+Tipo:       GroupContainer (AutoLayout vertical)
+Ubicacion:  conApp > conBody
+Propiedad:  LayoutOverflowY        (NUEVA)
+Formula:
+=LayoutOverflow.Scroll
+
+Control:    galResumen
+Propiedad:  FillPortions
+Formula:
+=0
+
+Control:    galResumen
+Propiedad:  Height
+Formula:
+=220
+
+Control:    galResumen
+Propiedad:  ShowScrollbar
+Formula:
+=true
+
+Control:    galAsign
+Propiedad:  FillPortions
+Formula:
+=0
+
+Control:    galAsign
+Propiedad:  Height
+Formula:
+=400
+
+Control:    galAsign
+Propiedad:  ShowScrollbar
+Formula:
+=true
+
+Control:    conFiltrosASG
+Propiedad:  FillPortions
+Formula:
+=0
+
+Control:    lblAsgCuenta
+Propiedad:  Text
+Formula:
+=CountRows(galAsign.AllItems) & " rows | " &
+ Text(Sum(galAsign.AllItems; Plantas); "#,##0") & " plants"
+
+
+==============================================================================
+PUNTO 9 - conCtrl: EL FLUJO DE TRABAJO COMPLETO
+==============================================================================
+
+9.1  QUE HACE CADA CONTROL DE LA BARRA
+-----------------------------------------------------------------------------
+  drpSitio            el sitio. Al cambiarlo dispara btnRecalcular.
+  inpVentana          NO se usa. Es un duplicado de inpVentanaGlobal.
+  inpVentanaGlobal    dias de limpieza entre ciclos para TODOS los cultivos
+                      (varVentanaGlobal, hoy 7). Al cambiarlo hace Patch a
+                      los 5 cultivos y vuelve a asignar.
+  inpAgrupar          varAgrupar, hoy 10 dias. Es la TOLERANCIA que el motor
+                      acepta para meter un VCR en un lote ya abierto: puede
+                      trasplantarlo hasta 10 dias antes de su Earliest o 10
+                      dias despues de su Latest si asi comparte lote. Si lo
+                      bajas a 0, cada VCR exige su fecha exacta y se abren
+                      muchisimos mas lotes (mas casas, mas desperdicio de
+                      capacidad). Si lo subes a 20, llenas casas mejor pero
+                      mas VCR salen "Late".
+  inpSobre            varSobre, hoy 5 (%). Sobrellenado permitido: si a un
+                      lote le faltan 200 plantas de cupo y el VCR trae 300,
+                      con 5% sobre una casa de 6.864 el motor acepta hasta
+                      343 plantas extra y mete el VCR completo en vez de
+                      partirlo. Evita partir VCR por diferencias chicas.
+  btnAuto             el motor. Asigna todo automaticamente (ver 9.2).
+  btnAgrupar          calcula los grupos de VCR (no asigna).
+  btnRecalcular       relee PLN_VCR -> colVCR, luego agrupa y asigna.
+  btnKPI              recalcula colOcup, colOcupFam y las tarjetas.
+  btnLimpiar          borra el plan en memoria.
+  btnGuardar          escribe colCiclos y colAsign a PLN_Ciclos y
+                      PLN_Asignacion (borra primero el ano con RemoveIf).
+
+9.2  COMO ASIGNA btnAuto (el motor, paso a paso)
+-----------------------------------------------------------------------------
+  1. Limpia colCiclos y colAsign.
+  2. colLibre = una fila por casa con su fecha Available (Disp).
+  3. colPend = los 186 VCR con Rest = plantas que faltan colocar.
+  4. Hace 6 PASADAS. En cada pasada recorre los VCR ordenados por TLast
+     ascendente (EDF: primero el que se vence antes).
+     Para cada VCR:
+     a) ABRIR O UNIR. Busca si ya existe un lote del MISMO cultivo, con cupo
+        libre, cuyo trasplante caiga dentro de [TEarly - varAgrupar,
+        TLast + varAgrupar]. Si existe, se UNE a ese lote. Si no existe,
+        ABRE un lote nuevo en la casa con mas capacidad que admita ese
+        cultivo y que este libre mas temprano.
+     b) La fecha de trasplante del lote nuevo es la mas TARDE entre
+        "la casa esta libre" y "Earliest + dias de semillero".
+     c) Mete en colAsign las plantas que caben (hasta Cap - ocupado, mas el
+        % de sobrellenado). Lo que no cabe queda en Rest y lo recoge la
+        siguiente pasada: asi se PARTE un VCR entre varias casas.
+     d) Marca la casa como ocupada hasta FechaLibre = trasplante + ciclo +
+        ventana de limpieza.
+     e) Estado = "Atrasado" si el trasplante quedo despues del Latest.
+  5. Lo que sigue con Rest > 0 al final de las 6 pasadas entra a colAsign
+     con Inv = "-" y Estado = "Sin cupo".
+  6. Select(btnKPI).
+
+  Seis pasadas porque un VCR grande puede necesitar hasta 6 casas: 7.920 es
+  la casa mas grande y el VCR mas grande del archivo no pasa de ~6 casas.
+
+9.3  FLUJO DE TRABAJO QUE TE RECOMIENDO
+-----------------------------------------------------------------------------
+  1. Parameters: revisa Semillero / Ciclo / Ventana por cultivo.
+  2. Greenhouses: revisa Capacity y Available de cada casa.
+  3. Barra: fija Grouping (10), Overfill % (5), Cleaning window (7).
+  4. "Assign automatically" (btnAuto). Mira los KPI: si "No space in
+     horizon" > 0, sube Grouping u Overfill, o adelanta algun Available.
+  5. Timeline: revisa casa por casa. Clic en una barra abre el popup con los
+     VCR de ese lote; ahi puedes mover un VCR a otra casa (drpMover), quitar
+     un VCR (btnQuitarVCR), borrar el lote (btnQuitarLote) o rellenarlo con
+     pendientes (btnRellenar).
+  6. VCR requests: con el filtro "Pending only" solo quedan los que faltan.
+     Marcas los que quieras, eliges casa en drpInvManual y fecha en
+     dtpFechaManual, y "Assign manually" (btnAsignarManual).
+  7. Assignment: revisa el detalle y "Save plan" (btnGuardar).
+
+  Ojo con el paso 7: btnAuto se vuelve a disparar en cada OnVisible de la
+  pantalla y en cada cambio de parametro, y eso BORRA los ajustes manuales
+  de los pasos 5 y 6. Guarda antes de cambiar parametros.
+
+9.4  LOS TRES TEXTINPUT DE LA BARRA ESTAN MAL ENCHUFADOS
+-----------------------------------------------------------------------------
+inpVentana, inpAgrupar e inpSobre tienen el valor puesto en Visible en vez de
+Default (Visible: =varVentanaGlobal, =varAgrupar, =varSobre) y ninguno tiene
+OnChange. Por eso nacen vacios y escribir en ellos no cambia nada.
+
+Control:    inpAgrupar
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  Visible
+Formula:
+=true
+
+Control:    inpAgrupar
+Propiedad:  Default
+Formula:
+=varAgrupar
+
+Control:    inpAgrupar
+Propiedad:  HintText
+Formula:
+="Grouping d"
+
+Control:    inpAgrupar
+Propiedad:  OnChange          (NUEVA)
+Formula:
+=Set(varAgrupar; Value(Self.Text));; Select(btnAuto)
+
+Control:    inpSobre
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  Visible
+Formula:
+=true
+
+Control:    inpSobre
+Propiedad:  Default
+Formula:
+=varSobre
+
+Control:    inpSobre
+Propiedad:  HintText
+Formula:
+="Overfill %"
+
+Control:    inpSobre
+Propiedad:  OnChange          (NUEVA)
+Formula:
+=Set(varSobre; Value(Self.Text));; Select(btnAuto)
+
+Control:    inpVentanaGlobal
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  Default
+Formula:
+=varVentanaGlobal
+
+Control:    inpVentanaGlobal
+Propiedad:  HintText
+Formula:
+="Cleaning d"
+
+Control:    inpVentana
+Accion:     ELIMINAR (duplicado de inpVentanaGlobal, no se usa en ninguna
+            formula)
+
+9.5  BOTONES AL INGLES
+-----------------------------------------------------------------------------
+Control: btnAuto        Propiedad: Text   Formula: ="Assign automatically"
+Control: btnLimpiar     Propiedad: Text   Formula: ="Clear plan"
+Control: btnGuardar     Propiedad: Text   Formula: ="Save plan"
+Control: btnAsignarManual  Propiedad: Text   Formula: ="Assign manually"
+
+Control:    btnAuto
+Propiedad:  OnSelect
+Accion:     cambiar SOLO la ultima linea
+ANTES   Set(varMsg; "Plan generado: " & CountRows(colCiclos) & " ciclos");
+DESPUES Set(varMsg; "Plan ready: " & CountRows(colCiclos) & " cycles")
+
+
+==============================================================================
+ANEXO A - SHAREPOINT: LO QUE HAY QUE AGREGAR
+==============================================================================
+
+A.1  LISTA NUEVA:  PLN_Parametros
+-----------------------------------------------------------------------------
+  5 filas (una por cultivo). La app la siembra sola la primera vez.
+
+  COLUMNA            TIPO DE DATO
+  ------------------------------------------------
+  Title              Una linea de texto
+  Cultivo            Una linea de texto
+  NombreES           Una linea de texto
+  Familia            Una linea de texto
+  DiasSemillero      Numero
+  DiasCiclo          Numero
+  DiasVentana        Numero
+  ColorHex           Una linea de texto
+
+A.2  LISTA PLN_Invernaderos: VERIFICAR NOMBRES EXACTOS
+-----------------------------------------------------------------------------
+  El YAML la referencia como PLN_INVERNADEROS. Las columnas que uso son:
+
+  COLUMNA            TIPO DE DATO
+  ------------------------------------------------
+  Title              Una linea de texto
+  Codigo             Una linea de texto
+  Bloque             Una linea de texto
+  Tipo               Eleccion  (Direct / Transplant)
+  CultivosPermitidos Una linea de texto
+  AreaM2             Numero
+  DensidadPlM2       Numero
+  CapacidadPlantas   Numero
+  DisponibleDesde    Fecha y hora (solo fecha)
+  Activo             Si/No
+  Orden              Numero
+
+  Si tus columnas se llaman distinto, cambia SOLO los nombres dentro de los
+  Patch y los ForAll del PUNTO 6, no la logica.
+
+A.3  COLUMNAS INDEXADAS (obligatorio para delegacion)
+-----------------------------------------------------------------------------
+  PLN_VCR            VCRID, CropName, SiteName, Anio
+  PLN_Invernaderos   Codigo, Activo
+  PLN_Parametros     Cultivo
+  PLN_Ciclos         Invernadero, Anio
+  PLN_Asignacion     VCRID, Invernadero, Anio
+
+
+==============================================================================
+ANEXO B - ORDEN CORRECTO DEL OnStart
+==============================================================================
+Este es el ORDEN, no el codigo completo. Mueve los bloques a esta secuencia:
+
+  1  Set de horizonte: varAnio, varIniPlan, varFinPlan, varSemanas
+  2  Set de parametros: varSitio, varAgrupar, varSobre, varProx, varGBase,
+     varVentanaGlobal, varExcluirCancel, varTab
+  3  Set de filtros y contadores en blanco: varInvSel, varLoteVer,
+     varFCultivo, varFCultivoVCR, varMsg, varMsgModal, varLoteN, varCapTotal,
+     varPedido, varColocado, varSinCupo, varAtrasados, varPartidos, varUtil,
+     varCapCuc, varCapSol, varUsoCuc, varUsoSol
+     + NUEVOS: varFEstVCR, varVDesde, varVHasta, varADesde, varAHasta,
+       varSelTick
+  4  Set de familias: varRegCuc, varRegSol, varRegTom
+  5  colTabs
+  6  colCultivos escrito a mano   ->   sembrar y releer PLN_Parametros
+                                       (bloque del PUNTO 6)
+  7  colInv escrito a mano        ->   sembrar y releer PLN_INVERNADEROS
+                                       (bloque del PUNTO 6)
+  8  Set(varCapTotal; Sum(colInv; Cap))
+  9  colOpcInvAsg       <- AQUI, despues de colInv (falla 0.2)
+ 10  colOpcBloque  +  colFBloque
+ 11  colOpcCultivo (en ingles)
+ 12  colOpcCriterio (en ingles)
+ 13  colOpcSitio
+ 14  colOpcEstado
+ 15  colLeyenda (derivada de colCultivos)
+ 16  Sembrado de esquemas + Clear: colCiclos (FechaTrasplante), colAsign
+     (Trasplante), colPend, colLibre, colGrupos, colSel, colOcup, colOcupFam,
+     colKPI
+ 17  colSemanas  ->  colMesesTmp  ->  colMeses
+
+Regla que ya te ha costado 137 errores: dentro de un mismo
+ClearCollect(...) los registros se separan con UN punto y coma (;). El doble
+punto y coma (;;) solo va ENTRE instrucciones completas, es decir despues del
+parentesis que cierra.
+
+==============================================================================
+FIN DEL DOCUMENTO
+==============================================================================
