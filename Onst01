@@ -1,0 +1,347 @@
+==============================================================================
+App . OnStart   -   CODIGO COMPLETO Y ORDENADO
+Planificador de invernaderos - PROCTO
+Sintaxis es-GT:  ;  separa argumentos    ;;  encadena instrucciones
+Sin comentarios, sin acentos, sin caracteres raros (eso fue lo que rompio el
+pegado las veces anteriores). Es UN SOLO bloque: borra todo lo que tienes en
+App.OnStart y pega desde "INICIO DEL CODIGO" hasta "FIN DEL CODIGO".
+==============================================================================
+
+ANTES DE PEGAR - 3 REQUISITOS
+-----------------------------------------------------------------------------
+1) En Agregar datos deben estar conectadas estas listas de SharePoint:
+      PLN_VCR            PLN_INVERNADEROS      PLN_Parametros
+      PLN_Ciclos         PLN_Asignacion
+   Si PLN_Parametros todavia no existe, creala primero (columnas en el
+   ANEXO A del documento de los 9 puntos) o borra el BLOQUE 6B segun la
+   nota del final de este archivo.
+
+2) El catalogo de 34 casas que esta escrito aqui se usa UNA SOLA VEZ, para
+   sembrar PLN_INVERNADEROS la primera vez que abras la app. De ahi en
+   adelante colInv se LEE de la lista, y lo que edites en galInv ya aguanta
+   el refresco. Lo mismo con los 5 cultivos y PLN_Parametros.
+
+3) Mantuve tus valores actuales: ano 2026, horizonte 01/10/2025 a 01/03/2027
+   (74 semanas), Salama Station, agrupar 10 d, sobrecupo 5 %, proximidad
+   10 d, ventana de limpieza 7 d.
+
+
+==============================================================================
+INICIO DEL CODIGO
+==============================================================================
+
+Set(varAnio; 2026);;
+Set(varIniPlan; Date(varAnio-1; 10; 1));;
+Set(varFinPlan; Date(varAnio+1; 3; 1));;
+Set(varSemanas; Max(1; RoundUp(DateDiff(varIniPlan; varFinPlan; TimeUnit.Days)/7; 0)));;
+
+Set(varSitio; "Salama Station");;
+Set(varAgrupar; 10);;
+Set(varSobre; 5);;
+Set(varProx; 10);;
+Set(varVentanaGlobal; 7);;
+Set(varGBase; "vent");;
+Set(varExcluirCancel; true);;
+Set(varTab; "TL");;
+
+Set(varInvSel; "");;
+Set(varLoteVer; "");;
+Set(varFCultivo; "");;
+Set(varFCultivoVCR; "");;
+Set(varFEstVCR; "PEND");;
+Set(varFAsgInv; "");;
+Set(varFAsgCrop; "");;
+Set(varFBloque; "");;
+Set(varVDesde; varIniPlan);;
+Set(varVHasta; varFinPlan);;
+Set(varADesde; varIniPlan);;
+Set(varAHasta; varFinPlan);;
+Set(varSelTick; false);;
+
+Set(varMsg; "");;
+Set(varMsgModal; "");;
+Set(varLoteN; 0);;
+Set(varCapTotal; 0);;
+Set(varCapCuc; 0);;
+Set(varCapSol; 0);;
+Set(varUsoCuc; 0);;
+Set(varUsoSol; 0);;
+Set(varPedido; 0);;
+Set(varColocado; 0);;
+Set(varSinCupo; 0);;
+Set(varAtrasados; 0);;
+Set(varPartidos; 0);;
+Set(varUtil; 0);;
+
+Set(varRegCuc; ";Melon;Watermelon;Cucumber;");;
+Set(varRegSol; ";Tomato;Pepper;");;
+Set(varRegTom; ";Tomato;");;
+
+ClearCollect(colTabs;
+    {Cod:"TL";  Nom:"Timeline"};
+    {Cod:"INV"; Nom:"Greenhouses"};
+    {Cod:"VCR"; Nom:"VCR requests"};
+    {Cod:"ASG"; Nom:"Assignment"};
+    {Cod:"PAR"; Nom:"Parameters"});;
+
+ClearCollect(colCultivos;
+    {Cultivo:"Tomato";     ES:"Tomate"; Familia:"Solanacea";     Semillero:28; Ciclo:120; Ventana:7; Hex:"#2a78d6"};
+    {Cultivo:"Pepper";     ES:"Chile";  Familia:"Solanacea";     Semillero:33; Ciclo:120; Ventana:7; Hex:"#eb6834"};
+    {Cultivo:"Melon";      ES:"Melon";  Familia:"Cucurbitacea";  Semillero:14; Ciclo:90;  Ventana:7; Hex:"#eda100"};
+    {Cultivo:"Watermelon"; ES:"Sandia"; Familia:"Cucurbitacea";  Semillero:18; Ciclo:108; Ventana:7; Hex:"#1baf7a"};
+    {Cultivo:"Cucumber";   ES:"Pepino"; Familia:"Cucurbitacea";  Semillero:16; Ciclo:116; Ventana:7; Hex:"#e87ba4"});;
+
+ClearCollect(colParSp; PLN_Parametros);;
+If(CountRows(colParSp) = 0;
+    ForAll(colCultivos As C;
+        Patch(PLN_Parametros; Defaults(PLN_Parametros);
+            {Title:         C.Cultivo;
+             Cultivo:       C.Cultivo;
+             NombreES:      C.ES;
+             Familia:       C.Familia;
+             DiasSemillero: C.Semillero;
+             DiasCiclo:     C.Ciclo;
+             DiasVentana:   C.Ventana;
+             ColorHex:      C.Hex})));;
+ClearCollect(colParSp; PLN_Parametros);;
+ClearCollect(colCultivos;
+    ForAll(colParSp As C;
+        {Cultivo:   C.Cultivo;
+         ES:        C.NombreES;
+         Familia:   C.Familia;
+         Semillero: C.DiasSemillero;
+         Ciclo:     C.DiasCiclo;
+         Ventana:   C.DiasVentana;
+         Hex:       C.ColorHex}));;
+
+ClearCollect(colInv;
+    {Cod:"GH 1";  Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:2213,76; Dens:1,8; Cap:6384; Disp:varIniPlan; Orden:10};
+    {Cod:"GH 2";  Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:3110,40; Dens:1,8; Cap:7920; Disp:varIniPlan; Orden:20};
+    {Cod:"GH 3A"; Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:980;     Dens:1,8; Cap:3885; Disp:varIniPlan; Orden:30};
+    {Cod:"GH 3B"; Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:980;     Dens:1,8; Cap:4134; Disp:varIniPlan; Orden:35};
+    {Cod:"GH 4";  Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:2548,80; Dens:1,8; Cap:6696; Disp:varIniPlan; Orden:40};
+    {Cod:"GH 5";  Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:3240,00; Dens:1,8; Cap:5832; Disp:varIniPlan; Orden:50};
+    {Cod:"GH 6";  Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:2462,40; Dens:1,8; Cap:5580; Disp:varIniPlan; Orden:60};
+    {Cod:"GH 7";  Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:1280,16; Dens:1,8; Cap:5184; Disp:varIniPlan; Orden:70};
+    {Cod:"GH 8";  Bloque:"GH 1-8";   Tipo:"Transplant"; Cultivos:varRegCuc; Area:1754,88; Dens:1,8; Cap:6864; Disp:varIniPlan; Orden:80};
+    {Cod:"GH 9";  Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6864; Disp:varIniPlan; Orden:90};
+    {Cod:"GH 10"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6864; Disp:varIniPlan; Orden:100};
+    {Cod:"GH 11"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6864; Disp:varIniPlan; Orden:110};
+    {Cod:"GH 12"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6864; Disp:varIniPlan; Orden:120};
+    {Cod:"GH 13"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:877,44;  Dens:2,8; Cap:3400; Disp:varIniPlan; Orden:130};
+    {Cod:"GH 15"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1280,16; Dens:2,8; Cap:5005; Disp:varIniPlan; Orden:150};
+    {Cod:"GH 16"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6864; Disp:varIniPlan; Orden:160};
+    {Cod:"GH 17"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6912; Disp:varIniPlan; Orden:170};
+    {Cod:"GH 18"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6864; Disp:varIniPlan; Orden:180};
+    {Cod:"GH 19"; Bloque:"GH 9-19";  Tipo:"Transplant"; Cultivos:varRegSol; Area:1754,88; Dens:2,8; Cap:6864; Disp:varIniPlan; Orden:190};
+    {Cod:"GH 20"; Bloque:"GH 20-24"; Tipo:"Transplant"; Cultivos:varRegCuc; Area:1754,88; Dens:1,8; Cap:4800; Disp:varIniPlan; Orden:200};
+    {Cod:"GH 21"; Bloque:"GH 20-24"; Tipo:"Transplant"; Cultivos:varRegCuc; Area:1754,88; Dens:1,8; Cap:4800; Disp:varIniPlan; Orden:210};
+    {Cod:"GH 22"; Bloque:"GH 20-24"; Tipo:"Transplant"; Cultivos:varRegCuc; Area:1316,16; Dens:1,8; Cap:3600; Disp:varIniPlan; Orden:220};
+    {Cod:"GH 23"; Bloque:"GH 20-24"; Tipo:"Transplant"; Cultivos:varRegCuc; Area:1468,80; Dens:1,8; Cap:3600; Disp:varIniPlan; Orden:230};
+    {Cod:"GH 24"; Bloque:"GH 20-24"; Tipo:"Transplant"; Cultivos:varRegCuc; Area:2448,00; Dens:1,8; Cap:6336; Disp:varIniPlan; Orden:240};
+    {Cod:"P1";    Bloque:"P1 P6";    Tipo:"Transplant"; Cultivos:varRegTom; Area:2100;    Dens:1,19; Cap:2500; Disp:varIniPlan; Orden:250};
+    {Cod:"P2";    Bloque:"P1 P6";    Tipo:"Transplant"; Cultivos:varRegTom; Area:2100;    Dens:1,19; Cap:2500; Disp:varIniPlan; Orden:252};
+    {Cod:"P3";    Bloque:"P1 P6";    Tipo:"Transplant"; Cultivos:varRegTom; Area:2100;    Dens:1,19; Cap:2500; Disp:varIniPlan; Orden:254};
+    {Cod:"P4";    Bloque:"P1 P6";    Tipo:"Transplant"; Cultivos:varRegTom; Area:2100;    Dens:1,19; Cap:2500; Disp:varIniPlan; Orden:256};
+    {Cod:"P5";    Bloque:"P1 P6";    Tipo:"Transplant"; Cultivos:varRegTom; Area:2100;    Dens:1,19; Cap:2500; Disp:varIniPlan; Orden:260};
+    {Cod:"P6";    Bloque:"P1 P6";    Tipo:"Transplant"; Cultivos:varRegTom; Area:1820;    Dens:1,37; Cap:2500; Disp:varIniPlan; Orden:270};
+    {Cod:"N1";    Bloque:"N1 N2";    Tipo:"Transplant"; Cultivos:varRegCuc; Area:640;     Dens:2,34; Cap:1500; Disp:varIniPlan; Orden:280};
+    {Cod:"N2";    Bloque:"N1 N2";    Tipo:"Transplant"; Cultivos:varRegCuc; Area:640;     Dens:2,34; Cap:1500; Disp:varIniPlan; Orden:290};
+    {Cod:"N8";    Bloque:"N8-N9";    Tipo:"Transplant"; Cultivos:varRegCuc; Area:720;     Dens:2,08; Cap:1500; Disp:varIniPlan; Orden:300};
+    {Cod:"N9";    Bloque:"N8-N9";    Tipo:"Transplant"; Cultivos:varRegCuc; Area:720;     Dens:2,08; Cap:1500; Disp:varIniPlan; Orden:310});;
+
+ClearCollect(colInvSp; PLN_INVERNADEROS);;
+If(CountRows(colInvSp) = 0;
+    ForAll(colInv As G;
+        Patch(PLN_INVERNADEROS; Defaults(PLN_INVERNADEROS);
+            {Title:              G.Cod;
+             Codigo:             G.Cod;
+             Bloque:             G.Bloque;
+             CultivosPermitidos: G.Cultivos;
+             AreaM2:             G.Area;
+             DensidadPlM2:       G.Dens;
+             CapacidadPlantas:   G.Cap;
+             DisponibleDesde:    G.Disp;
+             Activo:             true;
+             Orden:              G.Orden})));;
+ClearCollect(colInvSp; PLN_INVERNADEROS);;
+ClearCollect(colInv;
+    SortByColumns(
+        ForAll(Filter(colInvSp; Activo <> false) As G;
+            {Cod:      G.Codigo;
+             Bloque:   G.Bloque;
+             Tipo:     "Transplant";
+             Cultivos: G.CultivosPermitidos;
+             Area:     G.AreaM2;
+             Dens:     G.DensidadPlM2;
+             Cap:      G.CapacidadPlantas;
+             Disp:     G.DisponibleDesde;
+             Orden:    G.Orden});
+        "Orden"; SortOrder.Ascending));;
+
+Set(varCapTotal; Sum(colInv; Cap));;
+Set(varCapCuc; Sum(Filter(colInv; Find(";Melon;";  Cultivos) > 0); Cap));;
+Set(varCapSol; Sum(Filter(colInv; Find(";Tomato;"; Cultivos) > 0); Cap));;
+
+ClearCollect(colOpcInvAsg; {Cod:""; Nom:"All greenhouses"});;
+Collect(colOpcInvAsg; ForAll(colInv As G; {Cod:G.Cod; Nom:G.Cod}));;
+
+ClearCollect(colOpcBloque; {Bloque:""; Nom:"All blocks"});;
+Collect(colOpcBloque; ForAll(Distinct(colInv; Bloque) As B; {Bloque:B.Value; Nom:B.Value}));;
+ClearCollect(colFBloque; {Bloque:""});;
+
+ClearCollect(colOpcCultivo; {Cultivo:""; Nom:"All crops"});;
+Collect(colOpcCultivo; ForAll(colCultivos As C; {Cultivo:C.Cultivo; Nom:C.Cultivo}));;
+
+ClearCollect(colOpcCriterio;
+    {Modo:"vent";  Nom:"Shared planting window"};
+    {Modo:"early"; Nom:"Same earliest start"});;
+
+ClearCollect(colOpcSitio;
+    {Sitio:"Salama Station"};
+    {Sitio:"Guatemala-EXT"});;
+
+ClearCollect(colOpcEstado;
+    {Est:"PEND"; Nom:"Pending only"};
+    {Est:"PART"; Nom:"Partial only"};
+    {Est:"DONE"; Nom:"Assigned only"};
+    {Est:"";     Nom:"All VCR"});;
+
+ClearCollect(colLeyenda;
+    ForAll(colCultivos As C; {Nom:C.Cultivo; Dias:C.Ciclo & " d"; Hex:C.Hex}));;
+Collect(colLeyenda;
+    {Nom:"Cleaning window"; Dias:""; Hex:"#e6e6dd"};
+    {Nom:"In production";   Dias:""; Hex:"#b9b8ac"});;
+
+ClearCollect(colCiclos;
+    {Lote:""; Inv:""; Tipo:""; Cultivo:""; ES:""; FechaTrasplante:varIniPlan;
+     FechaFin:varIniPlan; FechaLibre:varIniPlan; Cap:0; Plantas:0; Origen:""; Hex:""});;
+Clear(colCiclos);;
+
+ClearCollect(colAsign;
+    {Lote:""; VCRID:0; Nombre:""; Cultivo:""; ES:""; Inv:""; Plantas:0;
+     Siembra:varIniPlan; Trasplante:varIniPlan; Fin:varIniPlan; Estado:"";
+     Origen:""; Hex:""});;
+Clear(colAsign);;
+
+ClearCollect(colPend;
+    {VCRID:0; Nombre:""; Cultivo:""; ES:""; Early:varIniPlan; Last:varIniPlan;
+     TEarly:varIniPlan; TLast:varIniPlan; Semillero:0; Ciclo:0; Ventana:0;
+     Hex:""; Rest:0});;
+Clear(colPend);;
+
+ClearCollect(colLibre; {Cod:""; Libre:varIniPlan});;
+Clear(colLibre);;
+
+ClearCollect(colGrupos;
+    {Gid:0; Cultivo:""; ES:""; Hex:""; Ini:varIniPlan; Fin:varIniPlan;
+     Comun:varIniPlan; VCRs:0; Plantas:0});;
+Clear(colGrupos);;
+
+ClearCollect(colGEst; {GN:0; Crop:""; LastMin:varIniPlan});;
+Clear(colGEst);;
+
+ClearCollect(colSel; {VCRID:0});;
+Clear(colSel);;
+
+ClearCollect(colOcup; {Sem:0; Ini:varIniPlan; Plantas:0; Casas:0});;
+Clear(colOcup);;
+
+ClearCollect(colOcupFam; {Sem:0; Cuc:0; Sol:0});;
+Clear(colOcupFam);;
+
+ClearCollect(colKPI; {Orden:0; Lab:""; Val:""; Sub:""; Alerta:""});;
+Clear(colKPI);;
+
+ClearCollect(colSemanas;
+    ForAll(Sequence(varSemanas) As S;
+        With({f: DateAdd(varIniPlan; (S.Value-1)*7; TimeUnit.Days)};
+            {Sem:    S.Value;
+             Ini:    f;
+             Fin:    DateAdd(f; 6; TimeUnit.Days);
+             WN:     WeekNum(f);
+             MesKey: Year(f)*100 + Month(f);
+             Mes:    Upper(Text(f; "[$-en-US]mmm"))})));;
+
+ClearCollect(colMesesTmp;
+    ForAll(Distinct(colSemanas; MesKey) As K;
+        {MesKey: K.Value;
+         Nom:    First(Filter(colSemanas; MesKey = K.Value)).Mes;
+         Sem:    CountRows(Filter(colSemanas; MesKey = K.Value))}));;
+
+ClearCollect(colMeses; SortByColumns(colMesesTmp; "MesKey"; SortOrder.Ascending));;
+
+==============================================================================
+FIN DEL CODIGO
+==============================================================================
+
+
+NOTAS
+==============================================================================
+
+1. QUE CAMBIE RESPECTO A TU ONSTART ACTUAL
+-----------------------------------------------------------------------------
+  a) colCiclos ahora se siembra con FechaTrasplante (antes FechaTransplant) y
+     colAsign con Trasplante (antes Transplant). Esto era lo que impedia que
+     btnAuto llenara colCiclos: el esquema no coincidia con las formulas de
+     los controles, y por eso el timeline, htmlOcup y los KPI salian vacios.
+  b) colOpcInvAsg se movio DESPUES de colInv. Antes estaba arriba, cuando
+     colInv todavia no existia, y drpAsgInv quedaba con una sola opcion.
+  c) colInv y colCultivos ahora se leen de SharePoint. El catalogo escrito a
+     mano solo siembra las listas la primera vez. Asi la fecha Available, la
+     capacidad y los dias de ciclo sobreviven al refresco de la pagina.
+  d) colOpcCultivo, colOpcCriterio y colLeyenda quedaron en ingles, y los
+     dias de la leyenda se derivan de colCultivos (ya no se desincronizan:
+     antes decia Pepper 130, Watermelon 100, Cucumber 95 y el parametro real
+     era 120, 108 y 116).
+  e) Variables nuevas: varFEstVCR, varVDesde, varVHasta, varADesde, varAHasta,
+     varSelTick, varCapCuc, varCapSol, varUsoCuc, varUsoSol.
+     Colecciones nuevas: colFBloque, colOpcEstado, colOcupFam, colGEst,
+     colParSp, colInvSp.
+  f) varSemanas va dentro de Max(1; ...) para matar el error de division
+     entre cero.
+  g) Se quitaron los Set duplicados (varInvSel, varLoteVer, varGBase y
+     varFBloque estaban dos veces) y el Set(varInvSel; Blank()) se cambio a
+     "" para que el popup compare contra el mismo tipo.
+  h) Area y Densidad de P1-P6, N1, N2, N8 y N9 se corrigieron para que
+     Area x Dens de la capacidad real, y GH 5 paso de 227,32 a 3.240,00 m2
+     (era un error de dedo: 227 m2 no dan 5.832 plantas). Las 24 casas GH
+     restantes siguen descuadradas; mientras no depures esas areas, aplica la
+     OPCION A de la falla 0.3 para que inpDens_1 e inpDens ya no recalculen
+     Cap.
+
+2. SI PLN_Parametros TODAVIA NO EXISTE
+-----------------------------------------------------------------------------
+   Borra las 22 lineas que van desde
+       ClearCollect(colParSp; PLN_Parametros);;
+   hasta
+       Hex:       C.ColorHex}));;
+   (las dos lineas inclusive). Todo lo demas funciona igual, solo que los
+   parametros de cultivo volveran a reiniciarse en cada refresco. Cuando
+   crees la lista, vuelve a pegar ese bloque.
+
+3. SI PLN_INVERNADEROS NO ESTA CONECTADA
+-----------------------------------------------------------------------------
+   Borra las lineas que van desde
+       ClearCollect(colInvSp; PLN_INVERNADEROS);;
+   hasta
+       "Orden"; SortOrder.Ascending));;
+   y el catalogo escrito a mano queda como unica fuente. Es lo que tienes
+   hoy, con el problema de que la fecha Available se pierde al refrescar.
+
+4. PRIMER ARRANQUE
+-----------------------------------------------------------------------------
+   La primera vez que corras la app con las listas vacias, OnStart escribe 34
+   filas en PLN_INVERNADEROS y 5 en PLN_Parametros. Eso tarda unos segundos.
+   Verificalo en SharePoint antes de seguir. Si por error quedan filas
+   duplicadas, borra la lista completa y vuelve a abrir la app.
+
+5. REGLA QUE YA TE COSTO 137 ERRORES
+-----------------------------------------------------------------------------
+   Dentro de un mismo ClearCollect(...) los registros se separan con UN punto
+   y coma (;). El doble punto y coma (;;) solo va ENTRE instrucciones
+   completas, es decir despues del parentesis que cierra. Si Power Apps te
+   senala un error en la ultima linea del OnStart, el problema casi siempre
+   es un ;; de mas adentro de un parentesis mucho mas arriba.
+
+==============================================================================
