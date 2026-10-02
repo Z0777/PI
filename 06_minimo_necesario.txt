@@ -1,0 +1,577 @@
+==============================================================================
+QUE ES OBLIGATORIO Y QUE NO
+Planificador de invernaderos - PROCTO
+==============================================================================
+
+RESPUESTA DIRECTA
+-----------------------------------------------------------------------------
+NO. No hay que cambiar todo el sistema.
+
+Para que la app deje de congelarse hay que cambiar 25 propiedades y agregar
+1 boton. Nada mas. Eso es unos 40 minutos de trabajo y resuelve el 90 % del
+problema de velocidad.
+
+Todo lo demas de los archivos 01 a 05 es mejora o funcionalidad nueva, y
+puede esperar semanas o no hacerse nunca. Me excedi dandote el rediseno
+completo de golpe sin separarlo por prioridad. Aqui esta separado.
+
+  NIVEL   QUE RESUELVE                        PROPIEDADES   TIEMPO   URGENCIA
+  ---------------------------------------------------------------------------
+  1       el congelamiento                    25 + 1 ctrl   40 min   HAZLO YA
+  2       la tolerancia por cultivo            4 + 1 col    15 min   esta semana
+  3       parametros desde la base de datos   ~25           1 h      cuando puedas
+  4       carga del Excel + flujos            ~10 + 2 flujos 3 h     cuando puedas
+  5       ingles, scroll, filtros             ~35           1 h      nunca urge
+
+Si solo haces el NIVEL 1, la app queda rapida y sigue funcionando
+exactamente igual que hoy en todo lo demas. El NIVEL 3 no es un requisito
+del NIVEL 1: son independientes.
+
+
+==============================================================================
+NIVEL 1 - LO UNICO OBLIGATORIO
+==============================================================================
+
+LA IDEA EN UNA FRASE
+  Hoy cada celda del timeline filtra colCiclos seis veces, y el motor
+  re-planifica todo cada vez que entras a la pantalla. El arreglo es:
+  precalcular las 2.516 celdas UNA vez en una coleccion (colGrid), y que el
+  motor solo corra cuando lo aprietas.
+
+Son cuatro cosas:
+  1.1  que OnVisible deje de correr el motor               (1 propiedad)
+  1.2  un boton nuevo que precalcula el dibujo             (1 control)
+  1.3  que la celda lea el dato precalculado               (10 propiedades)
+  1.4  que nadie mas dispare el motor sin permiso          (13 propiedades)
+
+REQUISITO PREVIO
+  colCiclos tiene que estar sembrada con la columna FechaTrasplante (no
+  FechaTransplant) y colAsign con Trasplante (no Transplant). Si ya pegaste
+  el OnStart_completo.txt, esto ya esta. Si no, corrigelo primero: sin eso
+  colCiclos nunca se llena y el timeline sale vacio, rapido o lento.
+
+
+-----------------------------------------------------------------------------
+1.1   scrPlan . OnVisible      REEMPLAZAR COMPLETO
+-----------------------------------------------------------------------------
+
+=If(!varPlanCargado;
+    ClearCollect(colVCRsp;
+        Filter(PLN_VCR; Anio = varAnio && SiteName = varSitio && VCRPlants > 0));;
+    ClearCollect(colVCR;
+        ForAll(Filter(colVCRsp;
+                !varExcluirCancel
+                || (!StartsWith(Lower(Estado); "canc")
+                    && !StartsWith(Lower(Estado); "cenc"))) As V;
+            With({cu: LookUp(colCultivos; Cultivo = V.CropName)};
+                {VCRID:     V.VCRID;
+                 Nombre:    V.VCRName;
+                 Cultivo:   V.CropName;
+                 ES:        cu.ES;
+                 Early:     V.EarliestStartDate;
+                 Last:      V.LatestStartDate;
+                 Plantas:   V.VCRPlants;
+                 Semillero: cu.Semillero;
+                 Ciclo:     cu.Ciclo;
+                 Ventana:   cu.Ventana;
+                 Tol:       Coalesce(cu.Tol; 20);
+                 TEarly:    DateAdd(V.EarliestStartDate; cu.Semillero; TimeUnit.Days);
+                 TLast:     DateAdd(V.LatestStartDate;   cu.Semillero; TimeUnit.Days);
+                 LimiteAsg: DateAdd(V.LatestStartDate; Coalesce(cu.Tol; 20); TimeUnit.Days);
+                 Vigente:   DateAdd(V.LatestStartDate; Coalesce(cu.Tol; 20);
+                                TimeUnit.Days) >= Today();
+                 Hex:       cu.Hex;
+                 Gid:       0})));;
+    Set(varPlanCargado; true))
+
+Control:    App
+Propiedad:  OnStart
+Accion:     AGREGAR una linea
+Formula:
+Set(varPlanCargado; false);;
+
+   Esta es la propiedad que mas pesaba: antes terminaba en
+   Select(btnAgrupar); Select(btnAuto), o sea 5,6 millones de operaciones
+   cada vez que la pantalla se hacia visible, incluso al volver de otra
+   pestana.
+
+   Nota: si colCultivos todavia esta escrita a mano en tu OnStart, agregale
+   Tol:20 a cada uno de los cultivos. Si ya la lees de PLN_Parametros,
+   agrega Tol: C.DiasTolerancia al ForAll. El Coalesce(cu.Tol; 20) hace que
+   funcione aunque todavia no exista la columna.
+
+
+-----------------------------------------------------------------------------
+1.2   btnRefrescarVista      CONTROL NUEVO  (el que arregla el dibujo)
+-----------------------------------------------------------------------------
+Tipo:       Classic/Button
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedades a fijar:
+   Visible   =false
+   X         =40
+   Y         =40
+   Text      ="view"
+   Height    =35
+   Width     =60
+
+Propiedad:  OnSelect
+Formula:
+
+=ClearCollect(colBarras;
+    ForAll(colCiclos As C;
+        {Lote:     C.Lote;
+         Inv:      C.Inv;
+         Cultivo:  C.Cultivo;
+         Hex:      C.Hex;
+         Plantas:  C.Plantas;
+         Cap:      C.Cap;
+         FIni:     C.FechaTrasplante;
+         FFin:     C.FechaFin;
+         SemIni:   RoundDown(DateDiff(varIniPlan; C.FechaTrasplante; TimeUnit.Days)/7; 0) + 1;
+         SemFin:   RoundDown(DateDiff(varIniPlan; C.FechaFin;        TimeUnit.Days)/7; 0) + 1;
+         SemLibre: RoundDown(DateDiff(varIniPlan; C.FechaLibre;      TimeUnit.Days)/7; 0) + 1}));;
+
+Clear(colGrid);;
+ForAll(colInv As G;
+    Collect(colGrid;
+        ForAll(colSemanas As S;
+            With({c: First(Filter(colBarras;
+                        Inv = G.Cod && SemIni <= S.Sem && SemLibre >= S.Sem))};
+                {Cod:  G.Cod;
+                 Sem:  S.Sem;
+                 Ini:  S.Ini;
+                 Fin:  S.Fin;
+                 Lote: Coalesce(c.Lote; "");
+                 Hex:  If(IsBlank(c.Lote);
+                          If(G.Disp > S.Fin; "#b9b8ac"; "#fdfdfb");
+                          c.SemFin >= S.Sem; c.Hex;
+                          "#e6e6dd");
+                 RadI: If(!IsBlank(c.Lote) && c.SemIni   = S.Sem; 6; 0);
+                 RadF: If(!IsBlank(c.Lote) && c.SemLibre = S.Sem; 6; 0);
+                 Tip:  If(IsBlank(c.Lote); "";
+                          c.Cultivo & "   " & Text(c.Plantas; "#,##0") & " pl" & Char(10) &
+                          Text(c.FIni; "dd/mm/yyyy") & "   ->   " &
+                          Text(c.FFin; "dd/mm/yyyy"))}))));;
+
+Select(btnKPI)
+
+   QUE HACE: convierte cada lote en tres NUMEROS DE SEMANA (colBarras) y con
+   eso resuelve de una vez el color, el redondeo y el tooltip de las 34 x 74
+   = 2.516 celdas (colGrid). Se construye una sola vez por cambio de plan.
+   El Collect va por casa, 34 llamadas de 74 registros cada una, no celda por
+   celda: esa es la diferencia entre 2 segundos y 40.
+
+
+-----------------------------------------------------------------------------
+1.3   galCeldas y btnCelda      LA CELDA SIN FILTROS
+-----------------------------------------------------------------------------
+Control: galCeldas   Propiedad: Items              Formula: =Filter(colGrid; Cod = lblCod_1.Text)
+Control: btnCelda    Propiedad: Fill               Formula: =ColorValue(ThisItem.Hex)
+Control: btnCelda    Propiedad: RadiusTopLeft      Formula: =ThisItem.RadI
+Control: btnCelda    Propiedad: RadiusBottomLeft   Formula: =ThisItem.RadI
+Control: btnCelda    Propiedad: RadiusTopRight     Formula: =ThisItem.RadF
+Control: btnCelda    Propiedad: RadiusBottomRight  Formula: =ThisItem.RadF
+Control: btnCelda    Propiedad: Tooltip            Formula: =ThisItem.Tip
+Control: btnCelda    Propiedad: Text               Formula: =""
+Control: btnCelda    Propiedad: BorderThickness    Formula: =0
+
+Control:    btnCelda
+Propiedad:  OnSelect
+Formula:
+=If(ThisItem.Lote <> "";
+    Set(varInvSel; ThisItem.Cod);;
+    Set(varLoteVer; ThisItem.Lote))
+
+Control:    conFila
+Propiedad:  Visible
+Formula:
+=false
+
+   conFila ya lo tenias invisible, pero htmlFila.HtmlText sigue recorriendo
+   colCiclos una vez por casa en cada repintado. Si quieres el ultimo
+   empujon de velocidad, ELIMINA conFila completo (se van btnFila, htmlFila,
+   lblCap y lblCod). Ya ninguna formula necesita lblCod: la celda usa
+   lblCod_1, que esta en Container2.
+
+
+-----------------------------------------------------------------------------
+1.4   QUITARLE EL GATILLO AL MOTOR      (13 propiedades)
+-----------------------------------------------------------------------------
+Estos ocho controles terminan su OnChange con  Select(btnAuto)  o
+Select(btnRecalcular). Cada vez que confirmas un numero, se reasignan los
+186 VCR. BORRA SOLO ESA ULTIMA LINEA de cada uno; lo demas del OnChange se
+queda igual.
+
+   inpDens_1          borrar:  Select(btnAuto)
+   inpDens            borrar:  Select(btnAuto)
+   inpCap             borrar:  Select(btnAuto)
+   inpSem             borrar:  Select(btnRecalcular)
+   inpCiclo           borrar:  Select(btnRecalcular)
+   inpVent            borrar:  Select(btnRecalcular)
+   inpVentanaGlobal   borrar:  Select(btnAuto)
+   dtpDisp            cambiar  Select(btnAuto)  por  Select(btnRefrescarVista)
+
+Y estos cuatro botones del popup terminan en Select(btnKPI). Hay que
+cambiarlo, porque si no, mueves un VCR y el timeline no se redibuja:
+
+   btnQuitarVCR       cambiar  Select(btnKPI)  por  Select(btnRefrescarVista)
+   btnQuitarLote      cambiar  Select(btnKPI)  por  Select(btnRefrescarVista)
+   btnRellenar        cambiar  Select(btnKPI)  por  Select(btnRefrescarVista)
+   drpMover           cambiar  Select(btnKPI)  por  Select(btnRefrescarVista)
+   btnAsignarManual   cambiar  Select(btnKPI)  por  Select(btnRefrescarVista)
+
+   btnRefrescarVista llama a btnKPI al final, asi que no pierdes el
+   recalculo de los indicadores.
+
+
+-----------------------------------------------------------------------------
+1.5   btnAuto      REEMPLAZAR OnSelect COMPLETO
+-----------------------------------------------------------------------------
+Lo mismo que ya tenias, con cuatro cambios: solo recorre los pendientes en
+cada pasada, 4 pasadas en lugar de 6, sin el ForAll que re-parcheaba los 200
+lotes en cada vuelta, y una sola busqueda en colLibre por casa. Ademas ya
+respeta la tolerancia por cultivo (ver NIVEL 2).
+
+=Set(varMsg; "Assigning...");;
+Clear(colCiclos);;
+Clear(colAsign);;
+ClearCollect(colLibre; ForAll(colInv As G; {Cod: G.Cod; Libre: G.Disp}));;
+
+ClearCollect(colPend;
+    ForAll(Filter(colVCR; Vigente) As V;
+        {VCRID:     V.VCRID;
+         Nombre:    V.Nombre;
+         Cultivo:   V.Cultivo;
+         ES:        V.ES;
+         Early:     V.Early;
+         Last:      V.Last;
+         TEarly:    V.TEarly;
+         TLast:     V.TLast;
+         Tol:       V.Tol;
+         Semillero: V.Semillero;
+         Ciclo:     V.Ciclo;
+         Ventana:   V.Ventana;
+         Hex:       V.Hex;
+         Rest:      V.Plantas}));;
+
+ForAll(Sequence(4) As Pasada;
+    ForAll(SortByColumns(Filter(colPend; Rest > 0); "TLast"; SortOrder.Ascending) As V;
+
+        Collect(colCiclos;
+            With({R:  LookUp(colPend; VCRID = V.VCRID).Rest;
+                  NJ: CountRows(Filter(colCiclos;
+                          Cultivo = V.Cultivo && Plantas < Cap
+                          && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                          && FechaTrasplante <= DateAdd(V.TLast;   V.Tol;      TimeUnit.Days)));
+                  C:  First(SortByColumns(SortByColumns(
+                          ForAll(Filter(colInv; Find(";" & V.Cultivo & ";"; Cultivos) > 0) As G;
+                              With({lib: LookUp(colLibre; Cod = G.Cod).Libre;
+                                    t0:  DateAdd(V.Early;
+                                             If(G.Tipo = "Direct"; 0; V.Semillero); TimeUnit.Days)};
+                                  {Cod:  G.Cod;
+                                   Cap:  G.Cap;
+                                   Tipo: G.Tipo;
+                                   Ini:  If(lib > t0; lib; t0)}));
+                          "Cap"; SortOrder.Descending);
+                          "Ini"; SortOrder.Ascending))};
+                If(R > 0 && NJ = 0 && C.Cod <> ""
+                   && C.Ini <= varFinPlan
+                   && C.Ini <= DateAdd(V.TLast; V.Tol; TimeUnit.Days);
+                    Table({Lote:            C.Cod & "-" & Text(C.Ini; "[$-en-US]yymmdd");
+                           Inv:             C.Cod;
+                           Tipo:            C.Tipo;
+                           Cultivo:         V.Cultivo;
+                           ES:              V.ES;
+                           FechaTrasplante: C.Ini;
+                           FechaFin:        DateAdd(C.Ini; V.Ciclo; TimeUnit.Days);
+                           FechaLibre:      DateAdd(C.Ini; V.Ciclo + V.Ventana; TimeUnit.Days);
+                           Cap:             C.Cap;
+                           Plantas:         0;
+                           Origen:          "NUEVO";
+                           Hex:             V.Hex});
+                    Filter(colCiclos; false))));;
+
+        Collect(colAsign;
+            With({R: LookUp(colPend; VCRID = V.VCRID).Rest;
+                  T: If(CountRows(Filter(colCiclos; Origen = "NUEVO")) > 0;
+                        First(Filter(colCiclos; Origen = "NUEVO"));
+                        First(SortByColumns(Filter(colCiclos;
+                            Cultivo = V.Cultivo && Plantas < Cap
+                            && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                            && FechaTrasplante <= DateAdd(V.TLast;   V.Tol;      TimeUnit.Days));
+                            "FechaTrasplante"; SortOrder.Ascending)))};
+                If(R > 0 && T.Lote <> "";
+                    Table({Lote:       T.Lote;
+                           VCRID:      V.VCRID;
+                           Nombre:     V.Nombre;
+                           Cultivo:    V.Cultivo;
+                           ES:         V.ES;
+                           Inv:        T.Inv;
+                           Plantas:    If(R <= (T.Cap - T.Plantas) + T.Cap * varSobre / 100;
+                                          R; T.Cap - T.Plantas);
+                           Siembra:    DateAdd(T.FechaTrasplante;
+                                           -If(T.Tipo = "Direct"; 0; V.Semillero); TimeUnit.Days);
+                           Trasplante: T.FechaTrasplante;
+                           Fin:        T.FechaFin;
+                           Dias:       Max(0; DateDiff(
+                                           If(T.Tipo = "Direct"; V.Last; V.TLast);
+                                           T.FechaTrasplante; TimeUnit.Days));
+                           Estado:     If(T.FechaTrasplante >
+                                          If(T.Tipo = "Direct"; V.Last; V.TLast);
+                                          "Fuera de ventana"; "Programado");
+                           Origen:     "Auto";
+                           Hex:        V.Hex});
+                    Filter(colAsign; false))));;
+
+        Patch(colCiclos; LookUp(colCiclos; Lote = Last(colAsign).Lote);
+            {Plantas: Sum(Filter(colAsign; Lote = Last(colAsign).Lote); Plantas)});;
+
+        ForAll(Filter(colCiclos; Origen = "NUEVO") As Z;
+            Patch(colCiclos; LookUp(colCiclos; Lote = Z.Lote); {Origen: "Auto"}));;
+
+        Patch(colLibre; LookUp(colLibre; Cod = Last(colAsign).Inv);
+            {Libre: LookUp(colCiclos; Lote = Last(colAsign).Lote).FechaLibre});;
+
+        Patch(colPend; LookUp(colPend; VCRID = V.VCRID);
+            {Rest: LookUp(colVCR; VCRID = V.VCRID).Plantas
+                   - Sum(Filter(colAsign; VCRID = V.VCRID); Plantas)})
+    ));;
+
+RemoveIf(colCiclos; Plantas = 0);;
+
+ForAll(Filter(colPend; Rest > 0) As V;
+    Collect(colAsign;
+        {Lote:       "";
+         VCRID:      V.VCRID;
+         Nombre:     V.Nombre;
+         Cultivo:    V.Cultivo;
+         ES:         V.ES;
+         Inv:        "-";
+         Plantas:    V.Rest;
+         Siembra:    V.Early;
+         Trasplante: V.Early;
+         Fin:        V.Early;
+         Dias:       0;
+         Estado:     "Sin cupo";
+         Origen:     "Auto";
+         Hex:        V.Hex}));;
+
+Select(btnRefrescarVista);;
+Set(varMsg;
+    "Plan ready: " & CountRows(colCiclos) & " cycles | " &
+    CountRows(Filter(colAsign; Estado = "Fuera de ventana")) & " out of window | " &
+    CountRows(Filter(colAsign; Estado = "Sin cupo")) & " without space")
+
+AVISO: colAsign ahora tiene dos columnas nuevas, Dias y el estado "Fuera de
+ventana" en lugar de "Atrasado". Hay que ajustar tres formulas que usaban
+"Atrasado" (estan en el NIVEL 2, punto 2.4). Y si tu OnStart siembra el
+esquema de colAsign, agregale  Dias:0  al registro semilla.
+
+Control:    App
+Propiedad:  OnStart
+Accion:     en el sembrado de colAsign, AGREGAR la columna Dias
+ANTES    Siembra:varIniPlan; Trasplante:varIniPlan; Fin:varIniPlan; Estado:"";
+DESPUES  Siembra:varIniPlan; Trasplante:varIniPlan; Fin:varIniPlan; Dias:0; Estado:"";
+
+
+==============================================================================
+NIVEL 2 - LA TOLERANCIA POR CULTIVO     (te entendi mal, aqui va corregido)
+==============================================================================
+
+LO QUE YO ENTENDI MAL
+-----------------------------------------------------------------------------
+Yo lo monte como: pasados los 20 dias el VCR queda cancelado Y ADEMAS no se
+puede asignar, y le puse 20 dias globales para todos los cultivos.
+
+LO QUE DIJISTE
+-----------------------------------------------------------------------------
+Dentro de esos dias el VCR SI SE PUEDE ASIGNAR; lo que pasa es que ya quedo
+fuera del Last Start Date y por eso debe marcarse "fuera de tiempo". Y los
+dias no son 20 para todos: son por cultivo y editables.
+
+COMO QUEDA
+-----------------------------------------------------------------------------
+Tres estados, no dos:
+
+  Trasplante <= TLast                      ->  "Programado"     (en ventana)
+  TLast < Trasplante <= TLast + Tol        ->  "Fuera de ventana +N d"
+                                               se asigna igual, pero marcado
+  Trasplante > TLast + Tol                 ->  el motor NO lo coloca
+  Hoy > LatestStartDate + Tol              ->  Vigente = false, ya no entra
+
+Donde Tol es la columna DiasTolerancia del cultivo. El motor del NIVEL 1 ya
+viene con esta regla puesta: cambie el tope de la ventana de busqueda de
+varAgrupar a V.Tol, y agregue la condicion
+   C.Ini <= DateAdd(V.TLast; V.Tol; TimeUnit.Days)
+para que ya no pueda abrir un lote arbitrariamente tarde (antes lo abria y
+solo lo marcaba "Atrasado").
+
+-----------------------------------------------------------------------------
+2.1   LA COLUMNA
+-----------------------------------------------------------------------------
+PLN_Parametros   (o la lista donde tengas los cultivos):
+   DiasTolerancia     Numero
+
+   Valores de arranque, cambialos a tu criterio:
+      Tomato         20
+      Tomato Cherry  20
+      Pepper         20
+      Melon          15     (ciclo mas corto, menos margen)
+      Watermelon     15
+      Cucumber       15
+
+   Si todavia no tienes PLN_Parametros, agrega Tol:20 a mano en el
+   ClearCollect(colCultivos) de tu OnStart y sigue con el punto 2.3.
+
+-----------------------------------------------------------------------------
+2.2   colCultivos
+-----------------------------------------------------------------------------
+Control:    App
+Propiedad:  OnStart
+Accion:     en el ForAll que lee PLN_Parametros, AGREGAR una linea
+Formula:
+         Tol:       C.DiasTolerancia;
+
+   O, si colCultivos sigue escrita a mano, agrega  Tol:20  a cada uno de los
+   registros, junto a Ventana:7.
+
+-----------------------------------------------------------------------------
+2.3   EL TEXTINPUT PARA EDITARLOS
+-----------------------------------------------------------------------------
+Control:    inpTol                     <- CONTROL NUEVO
+Tipo:       Classic/TextInput
+Ubicacion:  conApp > conBody > conPAR > galCultivos > conCulFila
+            (al lado de inpVent)
+Propiedades a fijar:
+   Default      =ThisItem.Tol
+   Format       =TextFormat.Number
+   Align        =Align.Center
+   Height       =36
+   Width        =90
+   Size         =10
+   HintText     ="Tol d"
+   BorderColor  =RGBA(245; 245; 245; 1)
+   OnChange     =Patch(colCultivos; LookUp(colCultivos; Cultivo = ThisItem.Cultivo);
+                      {Tol: Value(Self.Text)});;
+                  Patch(PLN_Parametros; LookUp(PLN_Parametros; Cultivo = ThisItem.Cultivo);
+                      {DiasTolerancia: Value(Self.Text)})
+
+   Si todavia no tienes PLN_Parametros, deja solo el primer Patch (el de
+   colCultivos) y borra el segundo.
+
+Control:    lblTolHdr                  <- CONTROL NUEVO
+Tipo:       Label
+Ubicacion:  conApp > conBody > conPAR > conCulHdr
+            (al lado de inpVent_1, que es el encabezado de la ventana)
+Propiedades a fijar:
+   Text         ="Tolerance after Last Start (d)"
+   Width        =90
+   Size         =9
+   Align        =Align.Center
+   FontWeight   =FontWeight.Semibold
+   BorderStyle  =BorderStyle.None
+
+-----------------------------------------------------------------------------
+2.4   DONDE SE VE "FUERA DE TIEMPO"       (3 formulas)
+-----------------------------------------------------------------------------
+Control:    lblAsgFin
+Tipo:       Label
+Ubicacion:  conApp > conBody > conASG > galAsign > conAsgFila
+Propiedad:  Text
+Formula:
+=Text(ThisItem.Fin; "dd/mm/yyyy") &
+ If(ThisItem.Dias > 0; "   (+" & ThisItem.Dias & " d late)"; "")
+
+Control:    lblAsgFin
+Propiedad:  Color
+Formula:
+=If(ThisItem.Dias > 0; RGBA(208; 59; 59; 1); RGBA(50; 49; 48; 1))
+
+Control:    lblEstado
+Tipo:       Label
+Ubicacion:  conApp > conBody > conVCR > galVCR > conVcrFila
+Propiedad:  Text
+Formula:
+=With({a: Sum(Filter(colAsign; VCRID = ThisItem.VCRID && Estado <> "Sin cupo"); Plantas);
+       d: Max(Filter(colAsign; VCRID = ThisItem.VCRID); Dias)};
+    If(!ThisItem.Vigente; "Expired (" &
+           -DateDiff(Today(); ThisItem.LimiteAsg; TimeUnit.Days) & " d over)";
+       a = 0; "Pending (" &
+           DateDiff(Today(); ThisItem.LimiteAsg; TimeUnit.Days) & " d left)";
+       Coalesce(d; 0) > 0; "Out of window +" & d & " d";
+       a < ThisItem.Plantas;
+           "Partial " & Text(a/Max(1; ThisItem.Plantas); "[$-en-US]0%");
+       "On time"))
+
+Control:    lblEstado
+Propiedad:  Color
+Formula:
+=With({a: Sum(Filter(colAsign; VCRID = ThisItem.VCRID && Estado <> "Sin cupo"); Plantas);
+       d: Coalesce(Max(Filter(colAsign; VCRID = ThisItem.VCRID); Dias); 0)};
+    If(!ThisItem.Vigente; RGBA(132; 131; 122; 1);
+       a = 0; RGBA(214; 139; 0; 1);
+       d > 0; RGBA(208; 59; 59; 1);
+       a < ThisItem.Plantas; RGBA(214; 139; 0; 1);
+       RGBA(12; 163; 12; 1)))
+
+   Y si en algun lado te quedo una formula que compara  Estado = "Atrasado",
+   cambiala por  Estado = "Fuera de ventana". Son: btnKPI (en el calculo de
+   varAtrasados) y lblEstado, que ya esta arriba.
+
+   Si PLN_Asignacion.Estado es columna de Eleccion, agrega la opcion
+   "Fuera de ventana" a la lista de opciones, o btnGuardar fallara al
+   guardar esas filas.
+
+
+==============================================================================
+QUE PUEDES IGNORAR POR AHORA
+==============================================================================
+
+  ARCHIVO 02 (App.Formulas)        -> NIVEL 3. Es una mejora real: saca los
+                                      catalogos del codigo y hace que editar
+                                      una casa se refleje solo. Pero la app
+                                      funciona sin eso. Dejalo para cuando
+                                      tengas una tarde libre.
+
+  ARCHIVO 03, puntos 3, 7, 8, 9    -> NIVEL 3 y 4. btnCargarPlan y la
+                                      persistencia del plan en SharePoint
+                                      solo hacen falta cuando quieras que el
+                                      plan sobreviva al cierre de la app.
+                                      Hoy se recalcula y ya.
+
+  ARCHIVO 04 (Excel + flujos)      -> NIVEL 4. Es FUNCIONALIDAD NUEVA, no un
+                                      arreglo. Hoy cargas PLN_VCR a mano y
+                                      funciona. Montalo cuando el cargado
+                                      manual te empiece a estorbar.
+
+  ARCHIVO 05, partes 1 a 3         -> NIVEL 3 (va junto con App.Formulas).
+  ARCHIVO 05, partes 5 a 8         -> NIVEL 5. Es cosmetica y filtros:
+                                      textos en ingles, el scroll de conASG,
+                                      htmlOcup alineado, drpBloque
+                                      multiple. Nada de eso cuelga la app.
+
+  LO UNICO DE LOS ARCHIVOS VIEJOS QUE SI VALE LA PENA METER YA, porque son
+  errores de verdad y se arreglan en un minuto cada uno:
+     dtpAsgDesde.DefaultDate = varIniPlan
+        (las dos fechas arrancaban en varFinPlan y galAsign salia vacia)
+     drpSitio.DefaultSelectedItems = Table({Sitio: "Salama Station"})
+     galGrupos.Visible = true
+     eliminar Gallery1 e inpVentana  (controles basura)
+
+
+==============================================================================
+COMO SABER SI EL NIVEL 1 FUNCIONO
+==============================================================================
+  1. Abre la app. Debe pintar en 3 a 6 segundos.
+  2. Cambia a la pestana Greenhouses y vuelve a Timeline. Debe ser
+     instantaneo. Si todavia tarda, el OnVisible no quedo bien.
+  3. Pon una capacidad distinta en una casa y presiona Enter. Debe ser
+     instantaneo. Si se cuelga, quedo algun Select(btnAuto) en un OnChange.
+  4. Presiona "Assign". Entre 20 y 45 segundos, una sola vez.
+  5. Haz scroll en el timeline. Debe ir fluido. Si se traba, galCeldas.Items
+     no quedo apuntando a colGrid.
+
+Si cualquiera de los cinco falla, dime cual y reviso solo esa parte. No
+hace falta rehacer nada mas.
+
+==============================================================================
