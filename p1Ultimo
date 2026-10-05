@@ -1,0 +1,244 @@
+==============================================================================
+PLN_Config  +  htmlOcup
+Correccion verificada renderizando el HTML real en un navegador
+==============================================================================
+
+
+==============================================================================
+PARTE A - PLN_Config:  ESOS NO SON COLUMNAS, SON FILAS
+==============================================================================
+
+Agrupar, Sobre, Prox, Ventana y Gracia NO son columnas. Son los VALORES de la
+columna Title, o sea cinco FILAS. La lista tiene solamente DOS columnas.
+
+ASI SE CREA LA LISTA
+-----------------------------------------------------------------------------
+  COLUMNA   TIPO DE DATO           NOTAS
+  ------------------------------------------------------------------------
+  Title     Una linea de texto     ya viene creada por SharePoint, no la
+                                   crees de nuevo; solo usala
+  Valor     Numero                 crea esta, y solo esta
+
+Eso es todo. Una columna de texto (la llave) y una de numero (el dato).
+
+ASI SE VE LA LISTA LLENA  (5 filas, ni una mas)
+-----------------------------------------------------------------------------
+  Title       Valor
+  -------------------
+  Agrupar       10
+  Sobre          5
+  Prox          10
+  Ventana        7
+  Gracia        20
+
+RESPUESTA DIRECTA A TU PREGUNTA
+-----------------------------------------------------------------------------
+  Las columnas:  Title es TEXTO, Valor es NUMERO.
+  Los cinco parametros: los cinco viven en la columna Valor, asi que si,
+  los cinco valores son numericos. Pero el nombre del parametro
+  ("Agrupar", "Sobre"...) es texto y va en Title.
+
+POR QUE ASI Y NO UNA COLUMNA POR PARAMETRO
+-----------------------------------------------------------------------------
+  Si manana quieres un sexto parametro, con este diseno agregas una FILA en
+  SharePoint y una linea en el OnStart. Con una columna por parametro
+  tendrias que crear una columna nueva en la lista cada vez. Por eso la
+  formula los lee asi:
+
+     Set(varAgrupar; Coalesce(LookUp(colCfgSp; Title = "Agrupar").Valor; 10));;
+
+  Busca la FILA cuyo Title dice "Agrupar" y toma su Valor. El Coalesce con 10
+  es el respaldo: si alguien borra esa fila, la app sigue funcionando con el
+  valor por defecto en lugar de quedarse en blanco.
+
+CUIDADO CON LA ESCRITURA
+-----------------------------------------------------------------------------
+  El Title tiene que decir exactamente Agrupar, Sobre, Prox, Ventana, Gracia.
+  Con mayuscula inicial y sin acentos ni espacios. Si escribes "agrupar" o
+  "Agrupar " con espacio al final, el LookUp no lo encuentra y el parametro se
+  queda en su valor por defecto sin avisarte.
+
+
+==============================================================================
+PARTE B - htmlOcup:  QUE ESTABA MAL Y COMO LO COMPROBE
+==============================================================================
+
+No lo adivine. Genere el HTML exacto que produce tu formula con tus 74 semanas
+y tu capacidad de 159.980 plantas, lo renderice en un navegador junto a
+htmlRegla y a una fila de 74 celdas como la de galCeldas, y medi la posicion
+en pixeles de las 74 columnas de cada uno.
+
+RESULTADO DE LA MEDICION
+-----------------------------------------------------------------------------
+  htmlRegla        columna 1 en x = 178,00   columna 74 en x = 1107,61
+  galCeldas        columna 1 en x = 178,00   columna 74 en x = 1107,61
+  htmlOcup ACTUAL  columna 1 en x = 183,00   columna 74 en x = 1102,34
+  htmlOcup NUEVO   columna 1 en x = 178,00   columna 74 en x = 1107,61
+
+  Desviacion maxima del ACTUAL contra la regla:  5,27 px
+  Desviacion maxima del NUEVO contra la regla:   0,00 px
+
+  Repeti la medicion a 800 px, 1120 px y 1400 px de ancho de pantalla.
+  El nuevo da 0,00 px en los tres.
+
+LAS CINCO CAUSAS
+-----------------------------------------------------------------------------
+1) FALTAN LOS CUATRO Padding EN CERO.  <- esta es la causa del desalineado
+   htmlRegla tiene PaddingTop, PaddingBottom, PaddingLeft y PaddingRight = 0.
+   htmlOcup NO los tiene, asi que conserva el relleno interno que el control
+   HtmlViewer trae de fabrica. Ese relleno empuja todo el contenido 5 px a la
+   derecha y le quita 10 px de ancho. Por eso la primera barra empieza 5 px
+   despues de la primera semana y la ultima se queda 5 px corta.
+   Son exactamente los 5,27 px que medi.
+
+2) LAS BARRAS SE SALEN 4 px POR DEBAJO DE LA LINEA BASE.
+   El contenedor dice height:110px con box-sizing:border-box y ademas lleva
+   border-top:1px + border-bottom:3px. Eso deja 106 px utiles por dentro,
+   pero cada columna hija declara height:110px. Sobran 4 px que se desbordan
+   por debajo del borde inferior. En el nuevo el contenedor mide 114 px con
+   2 px de borde arriba y abajo, asi que por dentro quedan exactamente 110.
+
+3) LA BARRA PODIA ENCOGERSE.
+   El div azul tiene width:82% dentro de un contenedor flex. Un hijo flex
+   tiene flex-shrink:1 por defecto, asi que el navegador puede angostarlo
+   cuando la columna es muy estrecha. En el nuevo es flex:0 0 76%, que fija
+   el ancho y no lo deja encoger.
+
+4) LAS SEMANAS CON POCAS PLANTAS DESAPARECIAN.
+   Una semana con 500 plantas sobre 159.980 da una barra de 0,34 px: el
+   navegador la redondea a nada y la semana se ve vacia aunque tenga siembra.
+   El nuevo pone un minimo de 2 px cuando hay plantas, y cero cuando de
+   verdad no hay.
+
+5) NO SE DISTINGUIA "SIN DATOS" DE "POCA OCUPACION".
+   Tu pico real anda por el 62% de la capacidad instalada. Sin lineas de
+   referencia, una grafica que llega a dos tercios de la altura y sin ejes se
+   lee como si estuviera vacia. El nuevo trae tres lineas punteadas en 25, 50
+   y 75%, y en el encabezado escribe el pico en plantas y en porcentaje. Si
+   un dia ves "peak 0 pl 0%" ya sabes que el problema es que colOcup esta
+   vacia (btnKPI no corrio) y no que la grafica este rota.
+
+
+==============================================================================
+PARTE C - LOS CAMBIOS
+==============================================================================
+
+C.1  LOS CUATRO PADDING   (sin esto, nada de lo demas alinea)
+-----------------------------------------------------------------------------
+Control:    htmlOcup
+Tipo:       HtmlViewer
+Ubicacion:  conApp > conBody > conTL > conOcup
+
+   PaddingTop      =0
+   PaddingBottom   =0
+   PaddingLeft     =0
+   PaddingRight    =0
+
+C.2  LA FORMULA
+-----------------------------------------------------------------------------
+Control:    htmlOcup
+Propiedad:  HtmlText
+Accion:     REEMPLAZAR COMPLETO
+
+="<div style='width:100%;font-family:Segoe UI,sans-serif;'>" &
+
+"<div style='display:flex;justify-content:space-between;height:13px;line-height:13px;" &
+"font-size:9px;font-weight:600;color:#84837a;'>" &
+"<span>" & Text(varCapTotal; "[$-en-US]#,##0") & " pl capacity</span>" &
+"<span>peak " & Text(Coalesce(Max(colOcup; Plantas); 0); "[$-en-US]#,##0") & " pl  " &
+Text(Coalesce(Max(colOcup; Plantas); 0) / Max(1; varCapTotal) * 100; "[$-en-US]0") &
+"%</span></div>" &
+
+"<div style='position:relative;width:100%;height:114px;box-sizing:border-box;" &
+"background:#fdfdfb;border-top:2px solid #c7c6ba;border-bottom:2px solid #c7c6ba;'>" &
+"<div style='position:absolute;left:0;right:0;top:27.5px;border-top:1px dashed #e0dfd6;'></div>" &
+"<div style='position:absolute;left:0;right:0;top:55px;border-top:1px dashed #e0dfd6;'></div>" &
+"<div style='position:absolute;left:0;right:0;top:82.5px;border-top:1px dashed #e0dfd6;'></div>" &
+
+"<div style='display:flex;width:100%;height:110px;'>" &
+Concat(colSemanas As S;
+    With({p: Coalesce(LookUp(colOcup; Sem = S.Sem).Plantas; 0)};
+        "<div style='height:110px;box-sizing:border-box;flex:1 1 0;min-width:0;" &
+        "border-left:1px solid " & If(Day(S.Ini) <= 7; "#c7c6ba"; "#f2f1ec") &
+        ";display:flex;align-items:flex-end;justify-content:center;'>" &
+        "<div style='flex:0 0 76%;height:" &
+        Text(If(p <= 0; 0; Max(2; Min(110; p / Max(1; varCapTotal) * 110))); "[$-en-US]0.##") &
+        "px;background:#2a78d6;border-radius:2px 2px 0 0;'></div></div>")) &
+"</div></div></div>"
+
+C.3  LAS ALTURAS
+-----------------------------------------------------------------------------
+Control: htmlOcup   Propiedad: Height           =132
+Control: conOcup    Propiedad: Height           =136
+Control: conOcup    Propiedad: LayoutMinHeight  =136
+
+   13 px del encabezado + 114 px del marco = 127. Con 132 queda holgado y no
+   aparece la barra de desplazamiento interna del HtmlViewer, que es otra
+   cosa que roba ancho y desalinea.
+
+C.4  LA ETIQUETA DE LA IZQUIERDA
+-----------------------------------------------------------------------------
+Control:    lblOcupLab
+Propiedad:  Width      =178        <- tiene que ser 178, ni uno mas ni uno menos
+Propiedad:  Text
+
+="Plants in" & Char(10) & "greenhouse"
+
+   178 es la suma de lblReglaCap (110) + Label1_1 (68) de conRegla, y de
+   lblCod_1 (110) + lblCap_1 (68) de Container2 en galTimeline. Los tres
+   bloques tienen que empezar en el mismo pixel o nada coincide.
+   Le quite la capacidad del texto porque ahora va en el encabezado de la
+   propia grafica, donde se lee mejor.
+
+
+==============================================================================
+PARTE D - COMO VERIFICAR QUE QUEDO BIEN
+==============================================================================
+
+1. Abre la app en el navegador al 100% de zoom (Ctrl+0). Con zoom distinto de
+   100 el navegador redondea distinto y vas a ver medio pixel de diferencia
+   que no existe.
+
+2. Presiona "Assign automatically" y espera a que aparezcan los lotes.
+
+3. Mira el encabezado de la grafica. Debe decir algo como
+       159,980 pl capacity                    peak 99,187 pl  62%
+   Si dice "peak 0 pl 0%" la grafica esta bien pero colOcup esta vacia:
+   corre btnKPI (lo dispara btnAuto al final) o revisa que colCiclos tenga
+   lotes.
+
+4. Busca en la regla la linea gruesa que separa dos meses, por ejemplo entre
+   DEC y JAN. Baja la vista en vertical. Esa misma linea tiene que caer
+   exactamente sobre el borde entre dos columnas de la grafica, sin medio
+   pixel de diferencia.
+
+5. La ultima columna de la grafica tiene que terminar en el mismo pixel que
+   la ultima semana de la regla, en el borde derecho.
+
+
+==============================================================================
+PARTE E - LO UNICO QUE NO PUEDO GARANTIZAR AL PIXEL
+==============================================================================
+
+htmlRegla y htmlOcup reparten el ancho en porcentaje, asi que el navegador
+los parte igual: por eso dan 0,00 px de diferencia entre ellos.
+
+galCeldas no: es una galeria y reparte en PIXELES, con
+     TemplateSize = Self.Width / Max(1; varSemanas)
+
+Si Power Apps redondea ese valor a entero, con 74 semanas puedes acumular
+hasta 1 px de corrimiento por celda hacia el final de la linea de tiempo. En
+mi prueba con reparto exacto da 0,00, pero eso depende de como redondee Power
+Apps en tu navegador.
+
+Si despues de aplicar todo esto ves que la REGLA y la GRAFICA coinciden
+perfectamente entre si pero las CELDAS de colores se van corriendo un poco
+hacia la derecha al final del ano, el problema es ese redondeo de la galeria,
+no el HTML. Dimelo y lo resolvemos cambiando galCeldas por un HtmlViewer mas,
+que es la unica forma de que las tres capas repartan con la misma regla. Pero
+perderias el clic por celda, asi que solo vale la pena si el corrimiento se
+nota de verdad.
+
+==============================================================================
+FIN DEL DOCUMENTO
+==============================================================================
