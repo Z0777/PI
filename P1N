@@ -1,0 +1,678 @@
+==============================================================================
+MODELO DE DATOS DEL PLANIFICADOR
+Para que sirve cada lista, como se llena, y por que el catalogo sigue
+apareciendo escrito en OnStart
+==============================================================================
+
+INDICE
+  0. DOS COSAS QUE VEO MAL EN TUS ORIGENES DE DATOS
+  1. EL MAPA: quien escribe y quien lee cada lista
+  2. PLN_Config         parametros del motor
+  3. PLN_Parametros     catalogo de cultivos
+  4. PLN_INVERNADEROS   catalogo de casas
+  5. PLN_VCR            la demanda
+  6. PLN_Ciclos         resultado: los lotes
+  7. PLN_Asignacion     resultado: el detalle por VCR
+  8. PLN_CargasVCR      biblioteca del Excel
+  9. POR QUE LA TABLA SIGUE EN OnStart Y CUANDO SE EJECUTA
+ 10. VCRID DEBE SER TEXTO: tienes razon, y esto es lo que hay que cambiar
+ 11. BOTON "RELOAD CATALOGS"
+
+
+==============================================================================
+0. DOS COSAS QUE VEO MAL EN TUS ORIGENES DE DATOS
+==============================================================================
+
+0.1  TIENES PLN_CULTIVOS Y PLN_Parametros: SON LA MISMA COSA
+-----------------------------------------------------------------------------
+En tu panel de "Agregar datos" aparecen las dos. El catalogo de cultivos debe
+vivir en UNA sola lista, y todo el codigo que te di usa PLN_Parametros.
+
+Decide una:
+  - Si PLN_CULTIVOS esta vacia o era un intento anterior: quitala de los
+    origenes de datos (clic en los tres puntos > Quitar) y borrala de
+    SharePoint. Te ahorra una conexion que se carga en cada arranque.
+  - Si PLN_CULTIVOS es la que ya tiene tus datos buenos: entonces renombra en
+    MI codigo PLN_Parametros por PLN_CULTIVOS en los 6 lugares donde aparece
+    (OnStart, inpSem, inpCiclo, inpVent, inpVentanaGlobal, btnRecargar), y
+    asegurate de que sus columnas se llamen Cultivo, NombreES, Familia,
+    DiasSemillero, DiasCiclo, DiasVentana, ColorHex.
+
+Dos listas con el mismo proposito es como te vas a equivocar dentro de tres
+meses. Deja una.
+
+0.2  TU CONEXION SE LLAMA PLN_Config_1, NO PLN_Config
+-----------------------------------------------------------------------------
+En la captura dice "PLN_Config_1". Power Apps le pone el sufijo _1 cuando ya
+existia un origen con ese nombre (lo agregaste dos veces, o quedo un fantasma
+de un intento anterior).
+
+El nombre que vale en las formulas es EXACTAMENTE el que muestra ese panel.
+Mientras diga PLN_Config_1, en todas mis formulas tienes que escribir
+PLN_Config_1 y no PLN_Config.
+
+Lo limpio es arreglarlo: quita TODAS las conexiones que digan PLN_Config y
+PLN_Config_1, guarda, cierra y vuelve a abrir la app, y agregala una sola vez.
+Debe quedar como PLN_Config a secas. Si no se deja, usa el nombre con _1 de
+forma consistente en todos lados.
+
+
+==============================================================================
+1. EL MAPA: QUIEN ESCRIBE Y QUIEN LEE
+==============================================================================
+
+  LISTA              QUIEN LA LLENA              QUIEN LA LEE
+  --------------------------------------------------------------------------
+  PLN_Config         tu, a mano o desde la       OnStart -> varAgrupar,
+                     barra superior de la app    varSobre, varProx,
+                                                 varVentanaGlobal, varGracia
+
+  PLN_Parametros     tu, a mano o desde la       OnStart -> colCultivos
+                     pestana Parameters          -> colLeyenda, colOpcCultivo
+
+  PLN_INVERNADEROS   tu, a mano o desde la       OnStart -> colInv
+                     pestana Greenhouses         -> galTimeline, galInv,
+                                                 el motor btnAuto
+
+  PLN_VCR            Power Automate (Excel)      btnRecalcular -> colVCR
+                     + la app al guardar
+                     (solo la columna Estado)
+
+  PLN_Ciclos         la app, boton Save plan     nadie dentro de la app;
+                                                 es para Power BI / historico
+
+  PLN_Asignacion     la app, boton Save plan     nadie dentro de la app;
+                                                 es el plan de siembra que
+                                                 exportas o imprimes
+
+  PLN_CargasVCR      tu, subiendo el .xlsx       Power Automate
+
+Regla mental sencilla:
+     Las TRES primeras son CATALOGOS: tu las mandas, la app las obedece.
+     PLN_VCR es la DEMANDA: entra por Excel, sale marcada con su estatus.
+     Las DOS de resultado las escribe la app; tu nunca las editas a mano.
+
+
+==============================================================================
+2. PLN_Config      parametros del motor
+==============================================================================
+
+PARA QUE SIRVE
+  Guarda los 5 numeros que cambian el comportamiento del motor. Antes vivian
+  escritos en OnStart y se perdian al refrescar la pagina.
+
+COLUMNAS
+  Title     Una linea de texto    la clave; tiene que escribirse igual
+  Valor     Numero
+
+COMO SE LLENA (ejemplo real, estas 5 filas y ninguna mas)
+
+  Title       Valor   Que hace
+  --------------------------------------------------------------------------
+  Agrupar      10     Dias de tolerancia para meter un VCR en un lote ya
+                      abierto. Puede trasplantarse hasta 10 dias antes de su
+                      Earliest o 10 despues de su Latest con tal de compartir
+                      lote. Si pones 0, cada VCR exige su fecha exacta y se
+                      abren muchos mas lotes.
+  Sobre         5     Porcentaje de sobrellenado permitido en una casa. Con 5
+                      en una casa de 6.864 el motor acepta hasta 343 plantas
+                      de mas con tal de no partir un VCR.
+  Prox         10     Dias de proximidad para AGRUPAR VCR entre si en la
+                      pestana VCR requests (no asigna, solo propone grupos).
+  Ventana       7     Dias de limpieza entre un ciclo y el siguiente en la
+                      misma casa.
+  Gracia       20     Dias despues del Latest Start Date en que un VCR todavia
+                      se puede asignar. Pasados esos dias queda vencido.
+
+QUIEN LA ACTUALIZA
+  Tu, desde la barra superior de la app: inpAgrupar, inpSobre, inpProx,
+  inpVentanaGlobal e inpVentana (dias de gracia). Cada uno hace Patch a esta
+  lista en su OnChange, asi que no necesitas entrar a SharePoint.
+
+
+==============================================================================
+3. PLN_Parametros      catalogo de cultivos
+==============================================================================
+
+PARA QUE SIRVE
+  Define cada cultivo: cuantos dias pasa en semillero, cuantos dias ocupa el
+  invernadero, cuantos dias de limpieza deja, a que familia pertenece y de que
+  color se pinta en la linea de tiempo.
+  De aqui sale TODA la cadena de fechas:
+       Trasplante = Earliest + DiasSemillero
+       Fin        = Trasplante + DiasCiclo
+       Casa libre = Fin + DiasVentana
+
+COLUMNAS
+  Title           Una linea de texto    pon lo mismo que Cultivo
+  Cultivo         Una linea de texto    DEBE coincidir letra por letra con el
+                                        CropName que trae el Excel
+  NombreES        Una linea de texto    solo para mostrar en el popup
+  Familia         Una linea de texto    Solanacea o Cucurbitacea
+  DiasSemillero   Numero
+  DiasCiclo       Numero
+  DiasVentana     Numero
+  ColorHex        Una linea de texto    con el # adelante
+
+COMO SE LLENA (ejemplo real, las 6 filas de hoy)
+
+  Cultivo        NombreES       Familia        Sem  Ciclo  Vent  ColorHex
+  --------------------------------------------------------------------------
+  Tomato         Tomate         Solanacea       28   120     7   #2a78d6
+  Tomato Cherry  Tomate cherry  Solanacea       28   120     7   #8e44ad
+  Pepper         Chile          Solanacea       33   120     7   #eb6834
+  Melon          Melon          Cucurbitacea    14    90     7   #eda100
+  Watermelon     Sandia         Cucurbitacea    18   108     7   #1baf7a
+  Cucumber       Pepino         Cucurbitacea    16   116     7   #e87ba4
+
+PARA AGREGAR UN CULTIVO NUEVO (por ejemplo Squash)
+  1. En SharePoint, nueva fila en PLN_Parametros:
+        Title = Squash   Cultivo = Squash   NombreES = Ayote
+        Familia = Cucurbitacea   DiasSemillero = 12
+        DiasCiclo = 85   DiasVentana = 7   ColorHex = #6b8e23
+  2. En la app, pestana Greenhouses, marca Squash en el combobox
+     "Crops allowed" de las casas que lo pueden recibir.
+  3. Listo. No tocas OnStart. La leyenda, el combobox de filtro de cultivo y
+     el motor lo recogen solos, porque colLeyenda y colOpcCultivo son formulas
+     con nombre que dependen de colCultivos.
+
+EL ERROR MAS COMUN AQUI
+  Que Cultivo diga "Tomato Cherry" y el Excel traiga "Cherry Tomato". Si no
+  coinciden, ese VCR entra con ES, Semillero, Ciclo y Hex en blanco y el motor
+  no lo coloca en ninguna casa. Copia y pega el valor del Excel, no lo
+  escribas de memoria.
+
+
+==============================================================================
+4. PLN_INVERNADEROS      catalogo de casas
+==============================================================================
+
+PARA QUE SIRVE
+  Las 34 casas con su capacidad real, que cultivos acepta cada una y desde
+  cuando esta libre. Es lo que el motor reparte.
+
+COLUMNAS
+  Title                Una linea de texto    pon lo mismo que Codigo
+  Codigo               Una linea de texto    GH 1, GH 3A, P1, N8...
+  Bloque               Una linea de texto    GH 1-8, GH 9-19, GH 20-24,
+                                             P1 P6, N1 N2, N8-N9
+  CultivosPermitidos   Una linea de texto    lista con ; al principio, entre
+                                             cada uno y al final
+  AreaM2               Numero                informativo
+  DensidadPlM2         Numero                informativo
+  CapacidadPlantas     Numero                ESTE es el dato que manda
+  DisponibleDesde      Fecha y hora          desde cuando la casa queda libre
+  Activo               Si/No                 No = desaparece de la app
+  Orden                Numero                orden de la linea de tiempo
+
+COMO SE LLENA (ejemplo de 4 filas)
+
+  Codigo  Bloque    CultivosPermitidos                   Area    Dens  Cap   Desde       Act  Ord
+  -------------------------------------------------------------------------------------------------
+  GH 2    GH 1-8    ;Melon;Watermelon;Cucumber;          3110,40  2,55  7920  01/10/2025  Si   20
+  GH 9    GH 9-19   ;Tomato;Tomato Cherry;Pepper;        1754,88  3,91  6864  01/10/2025  Si   90
+  GH 20   GH 20-24  ;Melon;Watermelon;Cucumber;          1754,88  2,74  4800  15/11/2025  Si  200
+  P1      P1 P6     ;Tomato;Tomato Cherry;               2100,00  1,19  2500  01/10/2025  Si  250
+
+EL FORMATO DE CultivosPermitidos ES CRITICO
+  Correcto:    ;Tomato;Tomato Cherry;Pepper;
+  Incorrecto:  Tomato;Tomato Cherry;Pepper     (le faltan los ; de las puntas)
+  Incorrecto:  ;Tomato; Tomato Cherry;Pepper;  (espacio despues del ;)
+
+  El motor pregunta  Find(";" & Cultivo & ";"; CultivosPermitidos) > 0.
+  Sin los punto y coma de las puntas, el ultimo y el primer cultivo de la
+  lista nunca se encuentran. Por eso en la app te puse el combobox multiple
+  "Crops allowed" en galInv: arma la cadena bien formada sola. Usalo en vez
+  de escribir el texto a mano.
+
+PARA AGREGAR UNA CASA NUEVA
+  Nueva fila en SharePoint con Codigo, Bloque, Capacidad, DisponibleDesde,
+  Activo = Si y un Orden que la ponga donde quieras. Abre la app y ya aparece
+  en la linea de tiempo, en galInv, en el filtro de bloques y en el combobox
+  de asignacion manual. No tocas OnStart.
+
+PARA DAR DE BAJA UNA CASA
+  No la borres: pon Activo = No. Asi conservas el historico de PLN_Ciclos.
+
+OJO CON Area Y Densidad
+  Son informativas. Cap es el dato maestro. En 24 de tus casas Area x Dens no
+  da Cap, por eso los campos Area y Densidad de galInv ya NO recalculan Cap.
+  Si corriges un area, corrige tambien la capacidad a mano.
+
+
+==============================================================================
+5. PLN_VCR      la demanda
+==============================================================================
+
+PARA QUE SIRVE
+  Una fila por solicitud de siembra. Es lo unico que entra por Excel.
+
+COLUMNAS
+  Title               Una linea de texto    pon lo mismo que VCRName
+  VCRID               Una linea de texto    <- TEXTO, ver punto 10
+  VCRName             Una linea de texto
+  CropName            Una linea de texto    igual a PLN_Parametros.Cultivo
+  SiteName            Una linea de texto    Salama Station / Guatemala-EXT
+  EarliestStartDate   Fecha y hora
+  LatestStartDate     Fecha y hora
+  VCRPlants           Numero
+  Estado              Una linea de texto    Pendiente / Parcial / Asignado /
+                                            Cancelado
+  Anio                Numero                temporada
+
+COMO SE LLENA (ejemplo de 3 filas)
+
+  VCRID        VCRName         CropName  SiteName        Earliest    Latest      Plants  Estado     Anio
+  ----------------------------------------------------------------------------------------------------
+  VCR-26-0012  TOM BETA 12     Tomato    Salama Station  05/11/2025  25/11/2025   3500   Pendiente  2026
+  VCR-26-0013  MEL GOLD 03     Melon     Salama Station  12/11/2025  02/12/2025   1800   Asignado   2026
+  00457        PEP RED 07      Pepper    Salama Station  20/11/2025  10/12/2025   2400   Pendiente  2026
+
+EL CICLO DE VIDA DE Estado
+  Pendiente   lo acaba de crear el flujo desde el Excel, o lo quitaste de la
+              linea de tiempo y volviste a guardar
+  Parcial     el plan coloco una parte de sus plantas, falta el resto
+  Asignado    el plan coloco todas sus plantas
+  Cancelado   paso el Latest Start Date + 20 dias (lo marca el flujo diario),
+              o venia cancelado del origen
+
+QUIEN LO CAMBIA
+  Pendiente   -> lo pone el flujo de importacion al crear
+  Parcial     -> lo pone la app en Save plan
+  Asignado    -> lo pone la app en Save plan
+  Cancelado   -> lo pone el flujo diario de vencidos
+
+POR QUE IMPORTA
+  btnRecalcular trae solo  Estado <> "Cancelado" && Estado <> "Asignado".
+  Eso es lo que hace que la segunda vez que cargues un Excel solo te jale lo
+  que falta por asignar. Si tocas Estado a mano en SharePoint estas mintiendo
+  a ese filtro, asi que no lo hagas salvo para corregir un error.
+
+
+==============================================================================
+6. PLN_Ciclos      resultado: los lotes
+==============================================================================
+
+PARA QUE SIRVE
+  Un LOTE es una siembra: una casa, un cultivo, una fecha de trasplante. Un
+  lote puede llevar varios VCR adentro si comparten ventana.
+  Esta lista es la fotografia del plan, para historico y para Power BI.
+
+COLUMNAS
+  Title             Una linea de texto    el id del lote: L001, M014...
+  Invernadero       Una linea de texto
+  Cultivo           Una linea de texto
+  FechaTrasplante   Fecha y hora
+  FechaFinCiclo     Fecha y hora
+  FechaLibre        Fecha y hora
+  PlantasLote       Numero
+  CapacidadLote     Numero
+  Origen            Eleccion              Auto / Manual
+  Anio              Numero
+
+EJEMPLO
+  Title  Invernadero  Cultivo  Trasplante  FinCiclo    Libre       Plantas  Cap   Origen  Anio
+  ---------------------------------------------------------------------------------------------
+  L001   GH 9         Tomato   03/12/2025  02/04/2026  09/04/2026   6864    6864  Auto    2026
+  M014   P1           Tomato   10/12/2025  09/04/2026  16/04/2026   2500    2500  Manual  2026
+
+TU NO LA EDITAS. La app borra todas las filas del ano y las vuelve a escribir
+cada vez que presionas Save plan.
+
+
+==============================================================================
+7. PLN_Asignacion      resultado: el detalle por VCR
+==============================================================================
+
+PARA QUE SIRVE
+  Una fila por cada VCR DENTRO de cada lote. Si un VCR de 10.000 plantas se
+  partio entre GH 9, GH 10 y P1, aqui salen tres filas. Esto es lo que
+  imprimes o exportas como plan de siembra.
+
+COLUMNAS
+  Title             Una linea de texto    VCRID-Lote
+  LoteId            Una linea de texto
+  VCRID             Una linea de texto    <- TEXTO, igual que en PLN_VCR
+  VCRName           Una linea de texto
+  Invernadero       Una linea de texto
+  Cultivo           Una linea de texto
+  Plantas           Numero
+  FechaSiembra      Fecha y hora          cuando entra al semillero
+  FechaTrasplante   Fecha y hora
+  FechaFin          Fecha y hora
+  SemanaIni         Numero
+  SemanaFin         Numero
+  Estado            Eleccion              Programado / Atrasado / Sin cupo
+  Origen            Eleccion              Auto / Manual
+  Anio              Numero
+
+EJEMPLO (un VCR partido en dos casas)
+  Title              LoteId VCRID        Inv    Cultivo  Plantas  Siembra     Trasp       Fin         Estado
+  -----------------------------------------------------------------------------------------------------------
+  VCR-26-0012-L001   L001   VCR-26-0012  GH 9   Tomato    3500    05/11/2025  03/12/2025  02/04/2026  Programado
+  VCR-26-0012-L007   L007   VCR-26-0012  GH 10  Tomato    1200    12/11/2025  10/12/2025  09/04/2026  Programado
+
+TU NO LA EDITAS. Igual que PLN_Ciclos, la reescribe Save plan.
+
+
+==============================================================================
+8. PLN_CargasVCR      biblioteca del Excel
+==============================================================================
+
+PARA QUE SIRVE
+  Es una BIBLIOTECA DE DOCUMENTOS, no una lista. Es el buzon donde dejas el
+  .xlsx que exportaste del sistema de VCR. Crear dentro una carpeta
+  "Procesados".
+
+EL EXCEL DEBE TENER
+  - Los datos como TABLA de Excel (seleccionas los datos > Insertar > Tabla),
+    con nombre VCR. Power Automate no puede leer un rango suelto.
+  - Encabezados con estos nombres exactos:
+       VCRID  VCRName  CropName  SiteName  EarliestStartDate  LatestStartDate
+       VCRPlants  Anio
+  - La columna VCRID con formato de celda TEXTO, para que no se pierdan los
+    ceros a la izquierda ni se convierta 00457 en 457.
+
+EJEMPLO DE LAS PRIMERAS FILAS DEL ARCHIVO
+
+  VCRID        VCRName      CropName  SiteName        EarliestStartDate  LatestStartDate  VCRPlants  Anio
+  --------------------------------------------------------------------------------------------------------
+  VCR-26-0012  TOM BETA 12  Tomato    Salama Station  2025-11-05         2025-11-25        3500      2026
+  VCR-26-0013  MEL GOLD 03  Melon     Salama Station  2025-11-12         2025-12-02        1800      2026
+
+  Las fechas en formato ISO (yyyy-mm-dd) evitan que Excel y Power Automate se
+  peleen por el dd/mm contra mm/dd.
+
+
+==============================================================================
+9. POR QUE LA TABLA SIGUE EN OnStart Y CUANDO SE EJECUTA
+==============================================================================
+
+Esta es tu duda central, asi que la respondo exacta.
+
+9.1  ESE Collect(...) NO SE EJECUTA SIEMPRE
+-----------------------------------------------------------------------------
+Mira la linea de arriba en tu propia captura:
+
+     ClearCollect(colInvSp; PLN_INVERNADEROS);;
+     If(CountRows(colInvSp) = 0;
+         Collect(PLN_INVERNADEROS; Table( ...las 34 casas... ));;
+         ClearCollect(colInvSp; PLN_INVERNADEROS));;
+
+La tabla escrita a mano esta DENTRO de un If que pregunta
+"la lista de SharePoint tiene cero filas?".
+
+  - La primera vez que abriste la app, la lista estaba vacia: el If entro y
+    escribio las 34 casas en SharePoint. Esa fue la SIEMBRA.
+  - La segunda vez y todas las demas, CountRows ya no es 0: el If no entra y
+    esa tabla NO se ejecuta. Esta ahi como texto muerto.
+
+O sea: ese bloque ya corrio y ya no vuelve a correr. Lo mismo con
+PLN_Parametros y con PLN_Config.
+
+9.2  LA RESPUESTA A TU PREGUNTA, EN UNA LINEA
+-----------------------------------------------------------------------------
+  Si cambias la base de datos, la app se actualiza. Si cambias la tabla de
+  OnStart, NO pasa nada.
+
+  Lo que la app usa de verdad es siempre esto, que esta debajo del If:
+
+     ClearCollect(colInv;
+         SortByColumns(ForAll(Filter(colInvSp; Activo <> false) As G; {...})));;
+
+  colInvSp viene de PLN_INVERNADEROS. Punto. A partir de la segunda apertura,
+  el catalogo escrito a mano es decoracion.
+
+  Entonces: NO TOQUES MAS LA TABLA DE OnStart. Edita SharePoint, o mejor,
+  edita desde la pestana Greenhouses y Parameters de la app, que ademas
+  escribe a SharePoint por ti.
+
+9.3  CUANDO SE REFLEJA EL CAMBIO
+-----------------------------------------------------------------------------
+  Cambias algo en SharePoint       ->  se ve al CERRAR Y ABRIR la app
+                                       (porque OnStart es el que lee)
+  Cambias algo desde la app        ->  se ve al instante, y queda guardado
+  Cambias algo en SharePoint y no  ->  usa el boton "Reload catalogs" del
+  quieres cerrar la app                punto 11
+
+9.4  SI QUIERES, PUEDES BORRAR LA SIEMBRA (recomendado)
+-----------------------------------------------------------------------------
+Ya que las tres listas estan llenas, el bloque escrito a mano solo te confunde
+y hace mas lenta la lectura del OnStart. Puedes borrarlo y dejar solo la
+lectura. Queda asi:
+
+  REEMPLAZA desde  ClearCollect(colInvSp; PLN_INVERNADEROS);;
+            hasta  "Orden"; SortOrder.Ascending));;
+  por:
+
+ClearCollect(colInvSp; PLN_INVERNADEROS);;
+ClearCollect(colInv;
+    SortByColumns(
+        ForAll(Filter(colInvSp; Activo <> false) As G;
+            {Cod:      G.Codigo;
+             Bloque:   G.Bloque;
+             Tipo:     "Transplant";
+             Cultivos: G.CultivosPermitidos;
+             Area:     G.AreaM2;
+             Dens:     G.DensidadPlM2;
+             Cap:      G.CapacidadPlantas;
+             Disp:     G.DisponibleDesde;
+             Orden:    G.Orden});
+        "Orden"; SortOrder.Ascending));;
+
+  REEMPLAZA desde  ClearCollect(colParSp; PLN_Parametros);;
+            hasta  Hex:       C.ColorHex}));;
+  por:
+
+ClearCollect(colParSp; PLN_Parametros);;
+ClearCollect(colCultivos;
+    ForAll(colParSp As C;
+        {Cultivo:   C.Cultivo;
+         ES:        C.NombreES;
+         Familia:   C.Familia;
+         Semillero: C.DiasSemillero;
+         Ciclo:     C.DiasCiclo;
+         Ventana:   C.DiasVentana;
+         Hex:       C.ColorHex}));;
+
+  REEMPLAZA desde  ClearCollect(colCfgSp; PLN_Config);;
+            hasta  Set(varGracia; ...);;
+  por:
+
+ClearCollect(colCfgSp; PLN_Config);;
+Set(varAgrupar;       Coalesce(LookUp(colCfgSp; Title = "Agrupar").Valor; 10));;
+Set(varSobre;         Coalesce(LookUp(colCfgSp; Title = "Sobre").Valor; 5));;
+Set(varProx;          Coalesce(LookUp(colCfgSp; Title = "Prox").Valor; 10));;
+Set(varVentanaGlobal; Coalesce(LookUp(colCfgSp; Title = "Ventana").Valor; 7));;
+Set(varGracia;        Coalesce(LookUp(colCfgSp; Title = "Gracia").Valor; 20));;
+
+ANTES DE BORRAR: abre SharePoint y confirma que PLN_INVERNADEROS tiene 34
+filas, PLN_Parametros 6 y PLN_Config 5. Si borras la siembra y una lista esta
+vacia, la app abre sin casas y sin cultivos.
+
+Si prefieres conservar la siembra por si algun dia tienes que reconstruir todo
+desde cero, dejala. No molesta, solo ocupa pantalla. Lo unico importante es
+que entiendas que ya no manda.
+
+
+==============================================================================
+10. VCRID DEBE SER TEXTO
+==============================================================================
+
+Tienes razon y es un cambio que conviene hacer AHORA, mientras las listas de
+resultado estan practicamente vacias. Despues duele mucho mas.
+
+10.1  POR QUE TEXTO
+-----------------------------------------------------------------------------
+  a) Los codigos de VCR casi nunca son numeros puros. En cuanto aparezca un
+     VCR-26-0012 o un 26A-0117, una columna Numero lo rechaza y el flujo de
+     importacion te deja esa fila fuera sin avisar.
+  b) Los ceros a la izquierda se pierden. 00457 guardado como Numero vuelve
+     como 457, y entonces el LookUp del flujo ya no encuentra la fila la
+     proxima vez: te crea un duplicado.
+  c) En SharePoint la columna Numero es de punto flotante. Un id de mas de 15
+     digitos pierde precision y dos VCR distintos pueden terminar iguales.
+  d) Un identificador no se suma, no se promedia y no se ordena por magnitud.
+     Nada en esta app hace aritmetica con VCRID: solo compara igualdad,
+     agrupa y concatena. Las tres cosas funcionan igual o mejor con texto.
+
+No hay ninguna contra. La igualdad sobre texto sigue siendo delegable en
+SharePoint, que era lo unico que podria preocupar.
+
+10.2  CAMBIOS EN SHAREPOINT
+-----------------------------------------------------------------------------
+  PLN_VCR . VCRID          Numero  ->  Una linea de texto
+  PLN_Asignacion . VCRID   Numero  ->  Una linea de texto
+
+  SharePoint normalmente deja convertir Numero a Una linea de texto en
+  Configuracion de la columna. Si se niega:
+     1. Crea VCRID_txt como Una linea de texto
+     2. Vista de cuadricula, copia la columna vieja a la nueva
+     3. Borra VCRID y renombra VCRID_txt a VCRID
+  Si la lista esta vacia, lo mas rapido es borrar la columna y crearla de
+  nuevo como texto.
+
+  Vuelve a indexar VCRID despues del cambio: el indice se pierde al cambiar
+  el tipo.
+
+10.3  CAMBIOS EN LA APP
+-----------------------------------------------------------------------------
+Solo hay que corregir las SEMILLAS DE ESQUEMA del OnStart. En Power Apps una
+coleccion toma el tipo de su primer registro, asi que si la siembras con
+VCRID:0 queda como numero para siempre y vas a ver el error "el tipo Texto no
+es compatible con Numero" en cuanto llegue el primer dato real.
+
+Control:   App
+Propiedad: OnStart
+Accion:    REEMPLAZAR los seis bloques de semilla que mencionan VCRID
+
+ClearCollect(colVCR;
+    {VCRID:""; Nombre:""; Cultivo:""; ES:""; Early:varIniPlan; Last:varIniPlan;
+     TEarly:varIniPlan; TLast:varIniPlan; Plantas:0; Semillero:0; Ciclo:0; Ventana:0;
+     Hex:""; Vence:varIniPlan; Expirado:false});;
+Clear(colVCR);;
+
+ClearCollect(colAsign;
+    {Lote:""; VCRID:""; Nombre:""; Cultivo:""; ES:""; Inv:""; Plantas:0;
+     Siembra:varIniPlan; Trasplante:varIniPlan; Fin:varIniPlan; Estado:"";
+     Origen:""; Hex:""});;
+Clear(colAsign);;
+
+ClearCollect(colPend;
+    {VCRID:""; Nombre:""; Cultivo:""; ES:""; Early:varIniPlan; Last:varIniPlan;
+     TEarly:varIniPlan; TLast:varIniPlan; Semillero:0; Ciclo:0; Ventana:0;
+     Hex:""; Rest:0});;
+Clear(colPend);;
+
+ClearCollect(colGid; {VCRID:""; Gid:0});;
+Clear(colGid);;
+
+ClearCollect(colVcrEst; {VCRID:""; Asignado:0; Atrasado:false});;
+Clear(colVcrEst);;
+
+ClearCollect(colSel; {VCRID:""});;
+Clear(colSel);;
+
+Es el unico cambio necesario en toda la pantalla. Todas las demas formulas
+(Filter, LookUp, Distinct, GroupBy, RemoveIf, Collect) comparan igualdad y
+funcionan igual con texto.
+
+Un solo detalle mas, por seguridad, en btnGuardar: la linea que arma el Title
+de PLN_Asignacion ya no necesita conversion implicita.
+
+Control:   btnGuardar
+Propiedad: OnSelect
+Accion:    cambiar SOLO esa linea dentro del Collect(PLN_Asignacion; ...)
+  ANTES    Title: A.VCRID & "-" & A.Lote;
+  DESPUES  Title: Text(A.VCRID) & "-" & A.Lote;
+
+10.4  CAMBIO EN POWER AUTOMATE
+-----------------------------------------------------------------------------
+En el flujo de importacion, el paso "Obtener elementos" de PLN_VCR. Con VCRID
+numerico la consulta iba sin comillas; con texto LLEVA COMILLAS SIMPLES:
+
+  ANTES    VCRID eq @{items('Aplicar_a_cada')?['VCRID']} and Anio eq @{...}
+  DESPUES  VCRID eq '@{items('Aplicar_a_cada')?['VCRID']}' and Anio eq @{...}
+
+Y al crear o actualizar el elemento, envuelve el valor en string() para que
+Excel no te mande un numero a una columna de texto:
+
+  VCRID = @{string(items('Aplicar_a_cada')?['VCRID'])}
+
+Si olvidas las comillas simples, la consulta no falla: devuelve CERO
+resultados siempre, y el flujo te va a crear un duplicado en cada importacion.
+Es el error mas silencioso de los dos.
+
+10.5  EN EL EXCEL
+-----------------------------------------------------------------------------
+Dale formato TEXTO a la columna VCRID antes de pegar los datos. Si la dejas
+en General, Excel convierte 00457 en 457 antes de que el flujo lo vea, y el
+problema vuelve por la puerta de atras.
+
+
+==============================================================================
+11. BOTON "RELOAD CATALOGS"
+==============================================================================
+
+Para cuando edites SharePoint con la app abierta y no quieras cerrarla.
+
+Control:    btnRecargar          <- CONTROL NUEVO
+Tipo:       Classic/Button
+Ubicacion:  conApp > conHeader > conCtrl   (junto a btnGuardar)
+Propiedades a fijar:
+   Text      ="Reload catalogs"
+   Width     =150
+   Height    =35
+   Fill      =RGBA(31; 92; 70; 1)
+   Color     =RGBA(255; 255; 255; 1)
+   Size      =10
+   OnSelect  (ver abajo)
+
+=Refresh(PLN_Config);;
+Refresh(PLN_Parametros);;
+Refresh(PLN_INVERNADEROS);;
+Refresh(PLN_VCR);;
+
+ClearCollect(colCfgSp; PLN_Config);;
+Set(varAgrupar;       Coalesce(LookUp(colCfgSp; Title = "Agrupar").Valor; 10));;
+Set(varSobre;         Coalesce(LookUp(colCfgSp; Title = "Sobre").Valor; 5));;
+Set(varProx;          Coalesce(LookUp(colCfgSp; Title = "Prox").Valor; 10));;
+Set(varVentanaGlobal; Coalesce(LookUp(colCfgSp; Title = "Ventana").Valor; 7));;
+Set(varGracia;        Coalesce(LookUp(colCfgSp; Title = "Gracia").Valor; 20));;
+
+ClearCollect(colParSp; PLN_Parametros);;
+ClearCollect(colCultivos;
+    ForAll(colParSp As C;
+        {Cultivo:   C.Cultivo;
+         ES:        C.NombreES;
+         Familia:   C.Familia;
+         Semillero: C.DiasSemillero;
+         Ciclo:     C.DiasCiclo;
+         Ventana:   C.DiasVentana;
+         Hex:       C.ColorHex}));;
+
+ClearCollect(colInvSp; PLN_INVERNADEROS);;
+ClearCollect(colInv;
+    SortByColumns(
+        ForAll(Filter(colInvSp; Activo <> false) As G;
+            {Cod:      G.Codigo;
+             Bloque:   G.Bloque;
+             Tipo:     "Transplant";
+             Cultivos: G.CultivosPermitidos;
+             Area:     G.AreaM2;
+             Dens:     G.DensidadPlM2;
+             Cap:      G.CapacidadPlantas;
+             Disp:     G.DisponibleDesde;
+             Orden:    G.Orden});
+        "Orden"; SortOrder.Ascending));;
+
+Select(btnRecalcular);;
+Notify("Catalogos recargados desde SharePoint"; NotificationType.Success)
+
+Refresh() le dice a Power Apps que tire su cache de esa lista y vuelva a
+preguntarle a SharePoint. Sin el, aunque vuelvas a hacer ClearCollect, te
+sirve los mismos datos viejos que ya tenia en memoria.
+
+==============================================================================
+FIN DEL DOCUMENTO
+==============================================================================
