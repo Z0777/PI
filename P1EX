@@ -1,0 +1,1311 @@
+==============================================================================
+PLANIFICADOR DE INVERNADEROS - OPTIMIZACION, PARAMETROS EN BASE DE DATOS,
+REGLA DE 20 DIAS, TOMATO CHERRY Y CARGA DE EXCEL
+Sintaxis es-GT:  ;  separa argumentos    ;;  encadena    coma decimal
+Solo los controles y propiedades que hay que cambiar.
+==============================================================================
+
+INDICE
+  1. POR QUE SE CONGELA (diagnostico con numeros)
+  2. App . Formulas            <- propiedad nueva, lo que sale de OnStart
+  3. App . OnStart             <- reemplazo completo (queda 60% mas corto)
+  4. scrPlan . OnVisible       <- deja de leer la base de datos cada vez
+  5. btnRecalcular             <- un solo lector de PLN_VCR
+  6. btnAuto                   <- motor optimizado + regla de 20 dias
+  7. btnAgrupar                <- deja de repintar galVCR 186 veces
+  8. btnKPI                    <- O(n) en vez de O(n x m)
+  9. GALERIAS: alturas fijas   <- ESTA ES LA CAUSA PRINCIPAL DEL CONGELAMIENTO
+ 10. galVCR, estatus y expirados
+ 11. galInv: cultivos editables por casa (Tomato Cherry)
+ 12. btnGuardar: escritura masiva + estatus de vuelta a PLN_VCR
+ 13. Controles a eliminar
+ 14. SharePoint: listas nuevas y columnas
+ 15. Power Automate: carga del Excel y barrido de vencidos
+ 16. Orden de aplicacion
+
+
+==============================================================================
+1. POR QUE SE CONGELA
+==============================================================================
+
+Revise el YAML control por control. No es una sola cosa, son cuatro, y la
+primera explica casi todo.
+
+1.1  NINGUNA GALERIA GRANDE TIENE ALTURA FIJA  (causa principal)
+-----------------------------------------------------------------------------
+galTimeline, galInv y galVCR no tienen la propiedad Height y estan dentro de
+conBody, que tiene LayoutOverflowY = Scroll. Cuando una galeria vive dentro de
+un contenedor que hace scroll y no tiene altura propia, Power Apps le da la
+altura de TODO su contenido. Y una galeria que mide lo que mide su contenido
+PIERDE LA VIRTUALIZACION: ya no dibuja solo las filas visibles, dibuja todas.
+
+Consecuencia en galTimeline:
+     34 casas x 74 semanas = 2.516 botones btnCelda existiendo a la vez.
+     Cada btnCelda tiene CUATRO formulas que hacen First(Filter(colCiclos;...)):
+     Fill, HoverFill, Tooltip y RadiusTopRight.
+     2.516 x 4 = 10.064 barridos de colCiclos CADA VEZ que algo cambia.
+     Con 300 lotes eso son ~3 millones de comparaciones por repintado.
+
+Consecuencia en galVCR:
+     186 filas (o las que traigas) dibujadas de golpe. Y cada fila hace TRES
+     Sum(Filter(colAsign;...)) por su cuenta (lblCasas, lblAsignado y lblEstado,
+     este ultimo dos veces porque Text y Color repiten el mismo Sum).
+     Eso son ~750 barridos de colAsign por repintado, encima de que el propio
+     Items ya es O(VCR x asignaciones).
+
+Esto es exactamente lo que notas: "solo pasa con esta app". Las otras no tienen
+una galeria anidada de 2.500 celdas.
+
+1.2  LA BASE DE DATOS SE LEE DOS VECES Y EL MOTOR CORRE TRES
+-----------------------------------------------------------------------------
+scrPlan.OnVisible tiene el MISMO ClearCollect de PLN_VCR que btnRecalcular,
+palabra por palabra. Y termina con Select(btnAgrupar); Select(btnAuto).
+Secuencia real al abrir la app:
+
+     OnStart            -> lee PLN_Parametros, PLN_INVERNADEROS (2 veces cada una)
+     OnVisible          -> lee PLN_VCR, arma colVCRsp Y colVCR (dos copias)
+     OnVisible          -> btnAgrupar  (pesado)
+     OnVisible          -> btnAuto     (muy pesado)
+     btnAuto            -> btnKPI      (pesado)
+
+Y cada vez que tocas drpSitio, inpAgrupar, inpSobre, un dtpDisp o un inpCap,
+se dispara btnAuto otra vez (y drpSitio dispara btnRecalcular, que vuelve a
+leer PLN_VCR y vuelve a correr btnAgrupar y btnAuto).
+
+1.3  btnAgrupar REPINTA galVCR UNA VEZ POR VCR
+-----------------------------------------------------------------------------
+Dentro de su ForAll hace:
+     Patch(colVCR; LookUp(colVCR; VCRID = V.VCRID); {Gid: ...})
+Cada Patch a colVCR invalida galVCR.Items, que es una formula O(VCR x
+asignaciones). Con 186 VCR son 186 recalculos de una formula cuadratica.
+Ese es el "se queda congelada" justo despues de abrir.
+
+1.4  btnKPI y galVCR.Items SON CUADRATICOS
+-----------------------------------------------------------------------------
+varAtrasados y varPartidos hacen ForAll(colVCR) y dentro CountRows(Filter(
+colAsign;...)). 186 x 400 = 74.400 comparaciones cada uno. Lo mismo el
+Asignado de galVCR.Items. Se arreglan con GroupBy y quedan O(n).
+
+1.5  TIENES RAZON CON App.Formulas
+-----------------------------------------------------------------------------
+Tu OnStart actual hace 72 instrucciones, muchas de ellas puro calculo derivado
+(colSemanas, colMeses, colOpcBloque, colOpcCultivo, colLeyenda, varSemanas,
+varCapTotal...). Todo eso se ejecuta SIEMPRE al abrir, aunque nadie lo mire.
+
+Las formulas con nombre (App.Formulas) son distintas: no se ejecutan al
+arrancar, se calculan la primera vez que alguien las pide y se vuelven a
+calcular solas cuando cambia algo de lo que dependen. Pasar lo derivado ahi:
+
+  - quita 19 instrucciones del arranque, la app abre notablemente mas rapido
+  - arregla PARA SIEMPRE el bug de orden (colOpcInvAsg antes que colInv):
+    una formula con nombre no tiene orden, se resuelve cuando se necesita
+  - colLeyenda y colOpcCultivo se sincronizan solos cuando editas un parametro
+  - btnAnio se reduce a una linea, porque varIniPlan, varFinPlan, varSemanas,
+    colSemanas y colMeses se recalculan solos al cambiar varAnio
+
+Regla importante: una formula con nombre NO se puede Set() ni Patch(). Por eso
+colInv y colCultivos siguen siendo colecciones (las editas en pantalla), pero
+varIniPlan, varSemanas, varCapTotal, colSemanas, colMeses y las listas de
+opciones dejan de tener Set/ClearCollect. Hay que BORRAR esos Set del OnStart y
+de btnAnio o la app no compila ("el nombre ya esta en uso").
+
+
+==============================================================================
+2. App . Formulas      (propiedad NUEVA)
+==============================================================================
+
+Control:   App
+Propiedad: Formulas     (en el arbol, selecciona App; la propiedad esta junto
+                         a OnStart en la lista de propiedades)
+Accion:    PEGAR COMPLETO (hoy esta vacia)
+
+varIniPlan = Date(varAnio - 1; 10; 1);;
+varFinPlan = Date(varAnio + 1; 3; 1);;
+varSemanas = Max(1; RoundUp(DateDiff(varIniPlan; varFinPlan; TimeUnit.Days)/7; 0));;
+
+varRegCuc = ";Melon;Watermelon;Cucumber;";;
+varRegSol = ";Tomato;Tomato Cherry;Pepper;";;
+varRegTom = ";Tomato;Tomato Cherry;";;
+
+varCapTotal = Sum(colInv; Cap);;
+varCapCuc   = Sum(Filter(colInv; Find(";Melon;";  Cultivos) > 0); Cap);;
+varCapSol   = Sum(Filter(colInv; Find(";Tomato;"; Cultivos) > 0); Cap);;
+
+colSemanas =
+    ForAll(Sequence(varSemanas) As S;
+        With({f: DateAdd(varIniPlan; (S.Value-1)*7; TimeUnit.Days)};
+            {Sem:    S.Value;
+             Ini:    f;
+             Fin:    DateAdd(f; 6; TimeUnit.Days);
+             WN:     WeekNum(f);
+             MesKey: Year(f)*100 + Month(f);
+             Mes:    Upper(Text(f; "[$-en-US]mmm"))}));;
+
+colMeses =
+    SortByColumns(
+        ForAll(Distinct(colSemanas; MesKey) As K;
+            {MesKey: K.Value;
+             Nom:    LookUp(colSemanas; MesKey = K.Value; Mes);
+             Sem:    CountRows(Filter(colSemanas; MesKey = K.Value))});
+        "MesKey"; SortOrder.Ascending);;
+
+colTabs =
+    Table({Cod:"TL";  Nom:"Timeline"};
+          {Cod:"INV"; Nom:"Greenhouses"};
+          {Cod:"VCR"; Nom:"VCR requests"};
+          {Cod:"ASG"; Nom:"Assignment"};
+          {Cod:"PAR"; Nom:"Parameters"});;
+
+colOpcSitio =
+    Table({Sitio:"Salama Station"};
+          {Sitio:"Guatemala-EXT"});;
+
+colOpcCriterio =
+    Table({Modo:"vent";  Nom:"Shared planting window"};
+          {Modo:"early"; Nom:"Same earliest start"});;
+
+colOpcEstado =
+    Table({Est:"PEND"; Nom:"Pending only"};
+          {Est:"PART"; Nom:"Partial only"};
+          {Est:"DONE"; Nom:"Assigned only"};
+          {Est:"EXP";  Nom:"Expired only"};
+          {Est:"";     Nom:"All VCR"});;
+
+colOpcBloque =
+    Ungroup(
+        Table({o: Table({Bloque: ""; Nom: "All blocks"})};
+              {o: ForAll(Distinct(colInv; Bloque) As B; {Bloque: B.Value; Nom: B.Value})});
+        "o");;
+
+colOpcInvAsg =
+    Ungroup(
+        Table({o: Table({Cod: ""; Nom: "All greenhouses"})};
+              {o: ForAll(colInv As G; {Cod: G.Cod; Nom: G.Cod})});
+        "o");;
+
+colOpcCultivo =
+    Ungroup(
+        Table({o: Table({Cultivo: ""; Nom: "All crops"})};
+              {o: ForAll(colCultivos As C; {Cultivo: C.Cultivo; Nom: C.Cultivo})});
+        "o");;
+
+colLeyenda =
+    Ungroup(
+        Table({o: ForAll(colCultivos As C; {Nom: C.Cultivo; Dias: C.Ciclo & " d"; Hex: C.Hex})};
+              {o: Table({Nom:"Cleaning window"; Dias:""; Hex:"#e6e6dd"};
+                        {Nom:"In production";   Dias:""; Hex:"#b9b8ac"})});
+        "o");;
+
+
+==============================================================================
+3. App . OnStart       (reemplazo completo)
+==============================================================================
+
+Control:   App
+Propiedad: OnStart
+Accion:    BORRAR TODO y pegar esto
+
+Que ya NO esta aqui: varIniPlan, varFinPlan, varSemanas, varRegCuc, varRegSol,
+varRegTom, varCapTotal, varCapCuc, varCapSol, colTabs, colSemanas, colMesesTmp,
+colMeses, colLeyenda, colOpcSitio, colOpcCriterio, colOpcEstado, colOpcBloque,
+colOpcCultivo y colOpcInvAsg. Todo eso vive ahora en App.Formulas.
+
+Que si esta: los Set de estado, los parametros leidos de PLN_Config, los
+cultivos leidos de PLN_Parametros, las casas leidas de PLN_INVERNADEROS y el
+sembrado de esquemas de las colecciones.
+
+Set(varAnio; 2026);;
+Set(varSitio; "Salama Station");;
+Set(varTab; "TL");;
+Set(varGBase; "vent");;
+Set(varCargado; false);;
+
+Set(varInvSel; "");;
+Set(varLoteVer; "");;
+Set(varFCultivo; "");;
+Set(varFCultivoVCR; "");;
+Set(varFEstVCR; "PEND");;
+Set(varFAsgInv; "");;
+Set(varFAsgCrop; "");;
+Set(varVDesde; varIniPlan);;
+Set(varVHasta; varFinPlan);;
+Set(varADesde; varIniPlan);;
+Set(varAHasta; varFinPlan);;
+Set(varSelTick; false);;
+Set(varMsg; "");;
+Set(varMsgModal; "");;
+Set(varLoteN; 0);;
+Set(varPedido; 0);;
+Set(varColocado; 0);;
+Set(varSinCupo; 0);;
+Set(varAtrasados; 0);;
+Set(varPartidos; 0);;
+Set(varExpirados; 0);;
+Set(varUsoCuc; 0);;
+Set(varUsoSol; 0);;
+Set(varUtil; 0);;
+
+ClearCollect(colCfgSp; PLN_Config);;
+If(CountRows(colCfgSp) = 0;
+    Collect(PLN_Config;
+        Table({Title:"Agrupar"; Valor:10};
+              {Title:"Sobre";   Valor:5};
+              {Title:"Prox";    Valor:10};
+              {Title:"Ventana"; Valor:7};
+              {Title:"Gracia";  Valor:20}));;
+    ClearCollect(colCfgSp; PLN_Config));;
+Set(varAgrupar;       Coalesce(LookUp(colCfgSp; Title = "Agrupar").Valor; 10));;
+Set(varSobre;         Coalesce(LookUp(colCfgSp; Title = "Sobre").Valor; 5));;
+Set(varProx;          Coalesce(LookUp(colCfgSp; Title = "Prox").Valor; 10));;
+Set(varVentanaGlobal; Coalesce(LookUp(colCfgSp; Title = "Ventana").Valor; 7));;
+Set(varGracia;        Coalesce(LookUp(colCfgSp; Title = "Gracia").Valor; 20));;
+
+ClearCollect(colParSp; PLN_Parametros);;
+If(CountRows(colParSp) = 0;
+    Collect(PLN_Parametros;
+        Table({Title:"Tomato";        Cultivo:"Tomato";        NombreES:"Tomate";        Familia:"Solanacea";    DiasSemillero:28; DiasCiclo:120; DiasVentana:7; ColorHex:"#2a78d6"};
+              {Title:"Tomato Cherry"; Cultivo:"Tomato Cherry"; NombreES:"Tomate cherry"; Familia:"Solanacea";    DiasSemillero:28; DiasCiclo:120; DiasVentana:7; ColorHex:"#8e44ad"};
+              {Title:"Pepper";        Cultivo:"Pepper";        NombreES:"Chile";         Familia:"Solanacea";    DiasSemillero:33; DiasCiclo:120; DiasVentana:7; ColorHex:"#eb6834"};
+              {Title:"Melon";         Cultivo:"Melon";         NombreES:"Melon";         Familia:"Cucurbitacea"; DiasSemillero:14; DiasCiclo:90;  DiasVentana:7; ColorHex:"#eda100"};
+              {Title:"Watermelon";    Cultivo:"Watermelon";    NombreES:"Sandia";        Familia:"Cucurbitacea"; DiasSemillero:18; DiasCiclo:108; DiasVentana:7; ColorHex:"#1baf7a"};
+              {Title:"Cucumber";      Cultivo:"Cucumber";      NombreES:"Pepino";        Familia:"Cucurbitacea"; DiasSemillero:16; DiasCiclo:116; DiasVentana:7; ColorHex:"#e87ba4"}));;
+    ClearCollect(colParSp; PLN_Parametros));;
+ClearCollect(colCultivos;
+    ForAll(colParSp As C;
+        {Cultivo:   C.Cultivo;
+         ES:        C.NombreES;
+         Familia:   C.Familia;
+         Semillero: C.DiasSemillero;
+         Ciclo:     C.DiasCiclo;
+         Ventana:   C.DiasVentana;
+         Hex:       C.ColorHex}));;
+
+ClearCollect(colInvSp; PLN_INVERNADEROS);;
+If(CountRows(colInvSp) = 0;
+    Collect(PLN_INVERNADEROS;
+        Table(
+        {Title:"GH 1";  Codigo:"GH 1";  Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:2213,76; DensidadPlM2:2,88; CapacidadPlantas:6384; DisponibleDesde:varIniPlan; Activo:true; Orden:10};
+        {Title:"GH 2";  Codigo:"GH 2";  Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:3110,40; DensidadPlM2:2,55; CapacidadPlantas:7920; DisponibleDesde:varIniPlan; Activo:true; Orden:20};
+        {Title:"GH 3A"; Codigo:"GH 3A"; Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:980,00;  DensidadPlM2:3,96; CapacidadPlantas:3885; DisponibleDesde:varIniPlan; Activo:true; Orden:30};
+        {Title:"GH 3B"; Codigo:"GH 3B"; Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:980,00;  DensidadPlM2:4,22; CapacidadPlantas:4134; DisponibleDesde:varIniPlan; Activo:true; Orden:35};
+        {Title:"GH 4";  Codigo:"GH 4";  Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:2548,80; DensidadPlM2:2,63; CapacidadPlantas:6696; DisponibleDesde:varIniPlan; Activo:true; Orden:40};
+        {Title:"GH 5";  Codigo:"GH 5";  Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:3240,00; DensidadPlM2:1,80; CapacidadPlantas:5832; DisponibleDesde:varIniPlan; Activo:true; Orden:50};
+        {Title:"GH 6";  Codigo:"GH 6";  Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:2462,40; DensidadPlM2:2,27; CapacidadPlantas:5580; DisponibleDesde:varIniPlan; Activo:true; Orden:60};
+        {Title:"GH 7";  Codigo:"GH 7";  Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:1280,16; DensidadPlM2:4,05; CapacidadPlantas:5184; DisponibleDesde:varIniPlan; Activo:true; Orden:70};
+        {Title:"GH 8";  Codigo:"GH 8";  Bloque:"GH 1-8";   CultivosPermitidos:varRegCuc; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:80};
+        {Title:"GH 9";  Codigo:"GH 9";  Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:90};
+        {Title:"GH 10"; Codigo:"GH 10"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:100};
+        {Title:"GH 11"; Codigo:"GH 11"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:110};
+        {Title:"GH 12"; Codigo:"GH 12"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:120};
+        {Title:"GH 13"; Codigo:"GH 13"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:877,44;  DensidadPlM2:3,88; CapacidadPlantas:3400; DisponibleDesde:varIniPlan; Activo:true; Orden:130};
+        {Title:"GH 15"; Codigo:"GH 15"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1280,16; DensidadPlM2:3,91; CapacidadPlantas:5005; DisponibleDesde:varIniPlan; Activo:true; Orden:150};
+        {Title:"GH 16"; Codigo:"GH 16"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:160};
+        {Title:"GH 17"; Codigo:"GH 17"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,94; CapacidadPlantas:6912; DisponibleDesde:varIniPlan; Activo:true; Orden:170};
+        {Title:"GH 18"; Codigo:"GH 18"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:180};
+        {Title:"GH 19"; Codigo:"GH 19"; Bloque:"GH 9-19";  CultivosPermitidos:varRegSol; AreaM2:1754,88; DensidadPlM2:3,91; CapacidadPlantas:6864; DisponibleDesde:varIniPlan; Activo:true; Orden:190};
+        {Title:"GH 20"; Codigo:"GH 20"; Bloque:"GH 20-24"; CultivosPermitidos:varRegCuc; AreaM2:1754,88; DensidadPlM2:2,74; CapacidadPlantas:4800; DisponibleDesde:varIniPlan; Activo:true; Orden:200};
+        {Title:"GH 21"; Codigo:"GH 21"; Bloque:"GH 20-24"; CultivosPermitidos:varRegCuc; AreaM2:1754,88; DensidadPlM2:2,74; CapacidadPlantas:4800; DisponibleDesde:varIniPlan; Activo:true; Orden:210};
+        {Title:"GH 22"; Codigo:"GH 22"; Bloque:"GH 20-24"; CultivosPermitidos:varRegCuc; AreaM2:1316,16; DensidadPlM2:2,74; CapacidadPlantas:3600; DisponibleDesde:varIniPlan; Activo:true; Orden:220};
+        {Title:"GH 23"; Codigo:"GH 23"; Bloque:"GH 20-24"; CultivosPermitidos:varRegCuc; AreaM2:1468,80; DensidadPlM2:2,45; CapacidadPlantas:3600; DisponibleDesde:varIniPlan; Activo:true; Orden:230};
+        {Title:"GH 24"; Codigo:"GH 24"; Bloque:"GH 20-24"; CultivosPermitidos:varRegCuc; AreaM2:2448,00; DensidadPlM2:2,59; CapacidadPlantas:6336; DisponibleDesde:varIniPlan; Activo:true; Orden:240};
+        {Title:"P1";    Codigo:"P1";    Bloque:"P1 P6";    CultivosPermitidos:varRegTom; AreaM2:2100,00; DensidadPlM2:1,19; CapacidadPlantas:2500; DisponibleDesde:varIniPlan; Activo:true; Orden:250};
+        {Title:"P2";    Codigo:"P2";    Bloque:"P1 P6";    CultivosPermitidos:varRegTom; AreaM2:2100,00; DensidadPlM2:1,19; CapacidadPlantas:2500; DisponibleDesde:varIniPlan; Activo:true; Orden:252};
+        {Title:"P3";    Codigo:"P3";    Bloque:"P1 P6";    CultivosPermitidos:varRegTom; AreaM2:2100,00; DensidadPlM2:1,19; CapacidadPlantas:2500; DisponibleDesde:varIniPlan; Activo:true; Orden:254};
+        {Title:"P4";    Codigo:"P4";    Bloque:"P1 P6";    CultivosPermitidos:varRegTom; AreaM2:2100,00; DensidadPlM2:1,19; CapacidadPlantas:2500; DisponibleDesde:varIniPlan; Activo:true; Orden:256};
+        {Title:"P5";    Codigo:"P5";    Bloque:"P1 P6";    CultivosPermitidos:varRegTom; AreaM2:2100,00; DensidadPlM2:1,19; CapacidadPlantas:2500; DisponibleDesde:varIniPlan; Activo:true; Orden:260};
+        {Title:"P6";    Codigo:"P6";    Bloque:"P1 P6";    CultivosPermitidos:varRegTom; AreaM2:1820,00; DensidadPlM2:1,37; CapacidadPlantas:2500; DisponibleDesde:varIniPlan; Activo:true; Orden:270};
+        {Title:"N1";    Codigo:"N1";    Bloque:"N1 N2";    CultivosPermitidos:varRegCuc; AreaM2:640,00;  DensidadPlM2:2,34; CapacidadPlantas:1500; DisponibleDesde:varIniPlan; Activo:true; Orden:280};
+        {Title:"N2";    Codigo:"N2";    Bloque:"N1 N2";    CultivosPermitidos:varRegCuc; AreaM2:640,00;  DensidadPlM2:2,34; CapacidadPlantas:1500; DisponibleDesde:varIniPlan; Activo:true; Orden:290};
+        {Title:"N8";    Codigo:"N8";    Bloque:"N8-N9";    CultivosPermitidos:varRegCuc; AreaM2:720,00;  DensidadPlM2:2,08; CapacidadPlantas:1500; DisponibleDesde:varIniPlan; Activo:true; Orden:300};
+        {Title:"N9";    Codigo:"N9";    Bloque:"N8-N9";    CultivosPermitidos:varRegCuc; AreaM2:720,00;  DensidadPlM2:2,08; CapacidadPlantas:1500; DisponibleDesde:varIniPlan; Activo:true; Orden:310}));;
+    ClearCollect(colInvSp; PLN_INVERNADEROS));;
+ClearCollect(colInv;
+    SortByColumns(
+        ForAll(Filter(colInvSp; Activo <> false) As G;
+            {Cod:      G.Codigo;
+             Bloque:   G.Bloque;
+             Tipo:     "Transplant";
+             Cultivos: G.CultivosPermitidos;
+             Area:     G.AreaM2;
+             Dens:     G.DensidadPlM2;
+             Cap:      G.CapacidadPlantas;
+             Disp:     G.DisponibleDesde;
+             Orden:    G.Orden});
+        "Orden"; SortOrder.Ascending));;
+
+ClearCollect(colVCR;
+    {VCRID:0; Nombre:""; Cultivo:""; ES:""; Early:varIniPlan; Last:varIniPlan;
+     TEarly:varIniPlan; TLast:varIniPlan; Plantas:0; Semillero:0; Ciclo:0; Ventana:0;
+     Hex:""; Vence:varIniPlan; Expirado:false});;
+Clear(colVCR);;
+
+ClearCollect(colCiclos;
+    {Lote:""; Inv:""; Tipo:""; Cultivo:""; ES:""; FechaTrasplante:varIniPlan;
+     FechaFin:varIniPlan; FechaLibre:varIniPlan; Cap:0; Plantas:0; Origen:""; Hex:""});;
+Clear(colCiclos);;
+
+ClearCollect(colAsign;
+    {Lote:""; VCRID:0; Nombre:""; Cultivo:""; ES:""; Inv:""; Plantas:0;
+     Siembra:varIniPlan; Trasplante:varIniPlan; Fin:varIniPlan; Estado:"";
+     Origen:""; Hex:""});;
+Clear(colAsign);;
+
+ClearCollect(colPend;
+    {VCRID:0; Nombre:""; Cultivo:""; ES:""; Early:varIniPlan; Last:varIniPlan;
+     TEarly:varIniPlan; TLast:varIniPlan; Semillero:0; Ciclo:0; Ventana:0;
+     Hex:""; Rest:0});;
+Clear(colPend);;
+
+ClearCollect(colLibre; {Cod:""; Libre:varIniPlan});;
+Clear(colLibre);;
+
+ClearCollect(colGEst; {GN:0; Crop:""; LastMin:varIniPlan});;
+Clear(colGEst);;
+
+ClearCollect(colGid; {VCRID:0; Gid:0});;
+Clear(colGid);;
+
+ClearCollect(colVG;
+    {Gid:0; Cultivo:""; ES:""; Hex:""; Early:varIniPlan; Last:varIniPlan; Plantas:0});;
+Clear(colVG);;
+
+ClearCollect(colGrupos;
+    {Gid:0; Cultivo:""; ES:""; Hex:""; Ini:varIniPlan; Fin:varIniPlan;
+     Comun:varIniPlan; VCRs:0; Plantas:0});;
+Clear(colGrupos);;
+
+ClearCollect(colVcrEst; {VCRID:0; Asignado:0; Atrasado:false});;
+Clear(colVcrEst);;
+
+ClearCollect(colSel; {VCRID:0});;
+Clear(colSel);;
+
+ClearCollect(colFBloque; {Bloque:""});;
+
+ClearCollect(colOcup; {Sem:0; Ini:varIniPlan; Plantas:0; Casas:0; Cuc:0; Sol:0});;
+Clear(colOcup);;
+
+ClearCollect(colKPI; {Orden:0; Lab:""; Val:""; Sub:""; Alerta:""});;
+Clear(colKPI);;
+
+
+==============================================================================
+4. scrPlan . OnVisible
+==============================================================================
+
+Control:   scrPlan  (la pantalla)
+Propiedad: OnVisible
+Accion:    BORRAR TODO el bloque actual y poner esta sola linea
+
+=If(!varCargado; Set(varCargado; true);; Select(btnRecalcular))
+
+Con esto la base de datos se lee UNA vez por sesion, no cada vez que la
+pantalla se vuelve a mostrar. Y toda la carga queda en un solo lugar
+(btnRecalcular), ya no duplicada entre OnVisible y el boton.
+
+
+==============================================================================
+5. btnRecalcular        (unico lector de PLN_VCR)
+==============================================================================
+
+Control:    btnRecalcular
+Tipo:       Classic/Button  (Visible = false)
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR COMPLETO
+
+=ClearCollect(colVCR;
+    ForAll(
+        Filter(PLN_VCR;
+            Anio = varAnio && SiteName = varSitio && VCRPlants > 0
+            && Estado <> "Cancelado" && Estado <> "Asignado") As V;
+        With({cu: LookUp(colCultivos; Cultivo = V.CropName)};
+            {VCRID:     V.VCRID;
+             Nombre:    V.VCRName;
+             Cultivo:   V.CropName;
+             ES:        cu.ES;
+             Early:     V.EarliestStartDate;
+             Last:      V.LatestStartDate;
+             Plantas:   V.VCRPlants;
+             Semillero: cu.Semillero;
+             Ciclo:     cu.Ciclo;
+             Ventana:   cu.Ventana;
+             TEarly:    DateAdd(V.EarliestStartDate; cu.Semillero; TimeUnit.Days);
+             TLast:     DateAdd(V.LatestStartDate;   cu.Semillero; TimeUnit.Days);
+             Hex:       cu.Hex;
+             Vence:     DateAdd(V.LatestStartDate; varGracia; TimeUnit.Days);
+             Expirado:  Today() > DateAdd(V.LatestStartDate; varGracia; TimeUnit.Days)})));;
+Select(btnAgrupar);;
+Select(btnAuto)
+
+Tres cosas cambiaron:
+  - desaparece colVCRsp. Antes guardabas DOS copias completas de los VCR en
+    memoria y las dos se recorrian. Ahora es una sola pasada.
+  - el filtro Estado <> "Cancelado" && Estado <> "Asignado" va del lado de
+    SharePoint, no en la app. Eso es lo que resuelve "hay una gran cantidad de
+    datos en la lista": si la lista tiene 5.000 filas historicas, la app solo
+    se trae las pendientes del ano y del sitio. Indexa Anio, SiteName y Estado
+    en la lista o el filtro deja de ser delegable.
+  - Vence y Expirado son nuevas (la regla de 20 dias, punto 6).
+
+OJO: desaparece el filtro StartsWith(Lower(Estado); "canc") y el de "cenc".
+Si tu lista trae el estado mal escrito, normalizalo con el flujo del punto 15,
+porque Lower() no es delegable y volveria a traerte toda la lista.
+
+
+==============================================================================
+6. btnAuto      (motor optimizado + regla de 20 dias)
+==============================================================================
+
+LA REGLA QUE PEDISTE
+-----------------------------------------------------------------------------
+"si despues de que pasan 20 dias despues de Last start date ese VCR queda
+cancelado, ya no puede asignarse, pero si aun quedan 20 dias aun puede
+asignarse."
+
+Se implementa asi:
+     Vence    = LatestStartDate + varGracia      (varGracia = 20, editable)
+     Expirado = Today() > Vence
+y colPend solo recibe los VCR con !Expirado. Un VCR vencido no recibe
+asignacion nueva; si ya tenia asignacion de antes, se la queda. Los vencidos
+NO entran a "Sin cupo": salen en su propio KPI y con estatus "Expired" en
+galVCR, para que no te ensucien el conteo de demanda sin cupo.
+
+Los 20 dias los controlas desde inpVentana (ver punto 6.2), que hoy esta
+invisible y sin usar.
+
+6.1  OPTIMIZACIONES DEL MOTOR
+-----------------------------------------------------------------------------
+  a) El bloque  ForAll(Filter(colCiclos; Plantas = 0) As Z; Patch(...))  barria
+     TODOS los lotes en cada una de las 1.116 iteraciones. Se elimina y se
+     sustituye por un solo RemoveIf(colCiclos; Plantas <= 0) al final.
+  b) Last(colAsign) se evaluaba tres veces por iteracion. Ahora se calcula una
+     vez con With({U: Last(colAsign)}).
+  c) Los dos LookUp(colLibre; Cod = G.Cod) por casa (68 lookups por VCR) se
+     reducen a uno con With({L: ...; E: ...}).
+  d) CountRows(Filter(colCiclos; Plantas = 0)) + First(Filter(...)) eran dos
+     barridos; ahora es uno con With({Z: ...}).
+  e) El lote vacio que se reutiliza ahora exige Cultivo = V.Cultivo. Antes
+     podia agarrar un lote vacio de otro cultivo.
+
+Control:    btnAuto
+Tipo:       Classic/Button
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR COMPLETO
+
+=Clear(colCiclos);;
+Clear(colAsign);;
+ClearCollect(colLibre; ForAll(colInv As G; {Cod: G.Cod; Libre: G.Disp}));;
+ClearCollect(colPend;
+    ForAll(Filter(colVCR; !Expirado) As V;
+        {VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+         Early: V.Early; Last: V.Last; TEarly: V.TEarly; TLast: V.TLast;
+         Semillero: V.Semillero; Ciclo: V.Ciclo; Ventana: V.Ventana;
+         Hex: V.Hex; Rest: V.Plantas}));;
+
+ForAll(Sequence(6) As Pasada;
+    ForAll(SortByColumns(colPend; "TLast"; SortOrder.Ascending) As V;
+
+        Collect(colCiclos;
+            With({R: LookUp(colPend; VCRID = V.VCRID).Rest;
+                  NJ: CountRows(Filter(colCiclos;
+                        Cultivo = V.Cultivo && Plantas < Cap
+                        && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                        && FechaTrasplante <= DateAdd(V.TLast; varAgrupar; TimeUnit.Days)));
+                  C: First(SortByColumns(SortByColumns(
+                        ForAll(Filter(colInv; Find(";" & V.Cultivo & ";"; Cultivos) > 0) As G;
+                            With({L: LookUp(colLibre; Cod = G.Cod).Libre;
+                                  E: DateAdd(V.Early;
+                                        If(G.Tipo = "Direct"; 0; V.Semillero); TimeUnit.Days)};
+                                {Cod: G.Cod; Cap: G.Cap; Tipo: G.Tipo; Ini: If(L > E; L; E)}));
+                        "Cap"; SortOrder.Descending); "Ini"; SortOrder.Ascending))};
+                If(R > 0 && NJ = 0 && C.Cod <> "" && C.Ini <= varFinPlan;
+                    Table({Lote: "L" & Text(CountRows(colCiclos) + 1; "[$-en-US]000");
+                           Inv: C.Cod; Tipo: C.Tipo; Cultivo: V.Cultivo; ES: V.ES;
+                           FechaTrasplante: C.Ini;
+                           FechaFin:   DateAdd(C.Ini; V.Ciclo; TimeUnit.Days);
+                           FechaLibre: DateAdd(C.Ini; V.Ciclo + V.Ventana; TimeUnit.Days);
+                           Cap: C.Cap; Plantas: 0; Origen: "Auto"; Hex: V.Hex});
+                    Filter(colCiclos; false))));
+
+        Collect(colAsign;
+            With({R: LookUp(colPend; VCRID = V.VCRID).Rest;
+                  Z: First(Filter(colCiclos; Plantas = 0 && Cultivo = V.Cultivo))};
+                With({T: If(!IsBlank(Z.Lote);
+                            Z;
+                            First(SortByColumns(Filter(colCiclos;
+                                Cultivo = V.Cultivo && Plantas < Cap
+                                && FechaTrasplante >= DateAdd(V.TEarly; -varAgrupar; TimeUnit.Days)
+                                && FechaTrasplante <= DateAdd(V.TLast; varAgrupar; TimeUnit.Days));
+                                "FechaTrasplante"; SortOrder.Ascending)))};
+                    If(R > 0 && T.Lote <> "";
+                        Table({Lote: T.Lote; VCRID: V.VCRID; Nombre: V.Nombre;
+                               Cultivo: V.Cultivo; ES: V.ES; Inv: T.Inv;
+                               Plantas: If(R <= (T.Cap - T.Plantas) + T.Cap * varSobre / 100;
+                                           R; T.Cap - T.Plantas);
+                               Siembra: DateAdd(T.FechaTrasplante;
+                                        -If(T.Tipo = "Direct"; 0; V.Semillero); TimeUnit.Days);
+                               Trasplante: T.FechaTrasplante;
+                               Fin: T.FechaFin;
+                               Estado: If(T.FechaTrasplante >
+                                          If(T.Tipo = "Direct"; V.Last; V.TLast);
+                                          "Atrasado"; "Programado");
+                               Origen: "Auto"; Hex: V.Hex});
+                        Filter(colAsign; false)))));
+
+        With({U: Last(colAsign)};
+            Patch(colCiclos; LookUp(colCiclos; Lote = U.Lote);
+                {Plantas: Sum(Filter(colAsign; Lote = U.Lote); Plantas)});;
+            Patch(colLibre; LookUp(colLibre; Cod = U.Inv);
+                {Libre: LookUp(colCiclos; Lote = U.Lote).FechaLibre});;
+            Patch(colPend; LookUp(colPend; VCRID = V.VCRID);
+                {Rest: LookUp(colVCR; VCRID = V.VCRID).Plantas
+                       - Sum(Filter(colAsign; VCRID = V.VCRID); Plantas)}))
+    ));;
+
+RemoveIf(colCiclos; Plantas <= 0);;
+
+ForAll(Filter(colPend; Rest > 0) As V;
+    Collect(colAsign;
+        {Lote: ""; VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+         Inv: "-"; Plantas: V.Rest; Siembra: V.Early; Trasplante: V.Early; Fin: V.Early;
+         Estado: "Sin cupo"; Origen: "Auto"; Hex: V.Hex}));;
+
+Select(btnKPI);;
+Set(varMsg; "Plan ready: " & CountRows(colCiclos) & " cycles")
+
+6.2  inpVentana PASA A SER LOS DIAS DE GRACIA
+-----------------------------------------------------------------------------
+Control:    inpVentana   (TextInput, hoy Visible = ///varVentanaGlobal, sin uso)
+Ubicacion:  conApp > conHeader > conCtrl
+
+   Visible    =true
+   Default    =varGracia
+   HintText   ="Expiry d"
+   OnChange   =Set(varGracia; Value(Self.Text));;
+                Patch(PLN_Config; LookUp(PLN_Config; Title = "Gracia");
+                    {Valor: varGracia});;
+                Select(btnRecalcular)
+
+6.3  LOS OTROS PARAMETROS TAMBIEN SE GUARDAN EN LA BASE
+-----------------------------------------------------------------------------
+Control: inpAgrupar          Propiedad: OnChange
+   =Set(varAgrupar; Value(Self.Text));;
+    Patch(PLN_Config; LookUp(PLN_Config; Title = "Agrupar"); {Valor: varAgrupar});;
+    Select(btnAuto)
+
+Control: inpSobre            Propiedad: OnChange
+   =Set(varSobre; Value(Self.Text));;
+    Patch(PLN_Config; LookUp(PLN_Config; Title = "Sobre"); {Valor: varSobre});;
+    Select(btnAuto)
+
+Control: inpProx             Propiedad: OnChange
+   =Set(varProx; Value(Self.Text));;
+    Patch(PLN_Config; LookUp(PLN_Config; Title = "Prox"); {Valor: varProx});;
+    Select(btnAgrupar)
+
+Control: inpVentanaGlobal    Propiedad: OnChange
+   =Set(varVentanaGlobal; Value(Self.Text));;
+    Patch(PLN_Config; LookUp(PLN_Config; Title = "Ventana"); {Valor: varVentanaGlobal});;
+    ForAll(colCultivos As C;
+        Patch(PLN_Parametros; LookUp(PLN_Parametros; Cultivo = C.Cultivo);
+            {DiasVentana: varVentanaGlobal}));;
+    ForAll(colCultivos As C;
+        Patch(colCultivos; LookUp(colCultivos; Cultivo = C.Cultivo);
+            {Ventana: varVentanaGlobal}));;
+    Select(btnAuto)
+
+Ahora si refrescas la pagina los cinco parametros vuelven como los dejaste.
+
+
+==============================================================================
+7. btnAgrupar     (deja de repintar galVCR 186 veces)
+==============================================================================
+
+El Gid ya no se escribe dentro de colVCR. Se escribe en colGid, una coleccion
+de dos columnas a la que no esta amarrada ninguna galeria. Asi los 186 Patch
+dejan de invalidar galVCR.Items.
+
+Control:    btnAgrupar
+Tipo:       Classic/Button  (Visible = false)
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR COMPLETO
+
+=ClearCollect(colGEst; {GN: 0; Crop: ""; LastMin: varIniPlan});;
+Clear(colGid);;
+ClearCollect(colOrdG;
+    If(varGBase = "early";
+       SortByColumns(SortByColumns(colVCR; "Early"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending);
+       SortByColumns(SortByColumns(colVCR; "Last"; SortOrder.Ascending);
+                     "Cultivo"; SortOrder.Ascending)));;
+
+ForAll(colOrdG As V;
+    Patch(colGEst; First(colGEst);
+        {GN: If(V.Cultivo <> First(colGEst).Crop
+                || V.Early > DateAdd(First(colGEst).LastMin; varProx; TimeUnit.Days);
+                First(colGEst).GN + 1; First(colGEst).GN);
+         Crop: V.Cultivo;
+         LastMin: If(V.Cultivo <> First(colGEst).Crop
+                     || V.Early > DateAdd(First(colGEst).LastMin; varProx; TimeUnit.Days);
+                     V.Last;
+                     If(V.Last < First(colGEst).LastMin; V.Last; First(colGEst).LastMin))});;
+    Collect(colGid; {VCRID: V.VCRID; Gid: First(colGEst).GN}));;
+
+ClearCollect(colVG;
+    ForAll(colGid As K;
+        With({V: LookUp(colVCR; VCRID = K.VCRID)};
+            {Gid: K.Gid; Cultivo: V.Cultivo; ES: V.ES; Hex: V.Hex;
+             Early: V.Early; Last: V.Last; Plantas: V.Plantas})));;
+
+ClearCollect(colGrupos;
+    ForAll(Distinct(colVG; Gid) As G;
+        With({it: Filter(colVG; Gid = G.Value)};
+            {Gid: G.Value;
+             Cultivo: First(it).Cultivo; ES: First(it).ES; Hex: First(it).Hex;
+             Ini:   First(SortByColumns(it; "Early"; SortOrder.Ascending)).Early;
+             Fin:   First(SortByColumns(it; "Last";  SortOrder.Descending)).Last;
+             Comun: First(SortByColumns(it; "Last";  SortOrder.Ascending)).Last;
+             VCRs: CountRows(it);
+             Plantas: Sum(it; Plantas)})))
+
+Los tres botones del grupo pasan a leer colGid en vez de colVCR:
+
+Control: btnSolo     Propiedad: OnSelect
+   =ClearCollect(colSel; ForAll(Filter(colGid; Gid = ThisItem.Gid) As V; {VCRID: V.VCRID}))
+
+Control: btnMas      Propiedad: OnSelect
+   =ForAll(Filter(colGid; Gid = ThisItem.Gid) As V;
+        If(IsBlank(LookUp(colSel; VCRID = V.VCRID)); Collect(colSel; {VCRID: V.VCRID})))
+
+Control: btnMenos    Propiedad: OnSelect
+   =ForAll(Filter(colGid; Gid = ThisItem.Gid) As V; RemoveIf(colSel; VCRID = V.VCRID))
+
+Control: galGrupos   Propiedad: Visible      =true
+Control: galGrupos   Propiedad: ShowScrollbar =true
+
+
+==============================================================================
+8. btnKPI        (de O(n x m) a O(n))
+==============================================================================
+
+Cambios:
+  - colOcup y colOcupFam se fusionan: antes eran 74 semanas x 4 barridos de
+    colCiclos; ahora 74 x 1 barrido reutilizado con With({ct: ...}).
+    colOcupFam desaparece; htmlOcup no cambia porque sigue leyendo colOcup.
+  - varAtrasados sale de un Distinct sobre colAsign: una pasada.
+  - varPartidos sale de un GroupBy: una pasada.
+  - se crea colVcrEst (una fila por VCR asignado, con el total y si va
+    atrasado). Esa es la tabla que usara galVCR en vez de recalcular sumas
+    fila por fila.
+  - desaparecen Set(varCapTotal), Set(varCapCuc) y Set(varCapSol): ahora son
+    formulas con nombre.
+  - KPI nuevo: Expired VCR.
+
+Control:    btnKPI
+Tipo:       Classic/Button  (Visible = false)
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR COMPLETO
+
+=ClearCollect(colOcup;
+    ForAll(colSemanas As S;
+        With({ct: Filter(colCiclos; FechaTrasplante <= S.Fin && FechaFin >= S.Ini)};
+            {Sem:     S.Sem;
+             Ini:     S.Ini;
+             Plantas: Sum(ct; Plantas);
+             Casas:   CountRows(ct);
+             Cuc:     Sum(Filter(ct; Find(";" & Cultivo & ";"; varRegCuc) > 0); Plantas);
+             Sol:     Sum(Filter(ct; Find(";" & Cultivo & ";"; varRegSol) > 0); Plantas)})));;
+
+ClearCollect(colVcrEst;
+    ForAll(AddColumns(GroupBy(Filter(colAsign; Estado <> "Sin cupo"); "VCRID"; "g");
+                      "Asig"; Sum(g; Plantas);
+                      "Atr";  CountRows(Filter(g; Estado = "Atrasado"))) As A;
+        {VCRID: A.VCRID; Asignado: A.Asig; Atrasado: A.Atr > 0}));;
+
+Set(varUsoCuc; Coalesce(Max(colOcup; Cuc); 0));;
+Set(varUsoSol; Coalesce(Max(colOcup; Sol); 0));;
+Set(varPedido;   Sum(colVCR; Plantas));;
+Set(varColocado; Sum(Filter(colAsign; Estado <> "Sin cupo"); Plantas));;
+Set(varSinCupo;  Sum(Filter(colAsign; Estado =  "Sin cupo"); Plantas));;
+Set(varAtrasados; CountRows(Distinct(Filter(colAsign; Estado = "Atrasado"); VCRID)));;
+Set(varPartidos;
+    CountRows(Filter(AddColumns(GroupBy(Filter(colAsign; Estado <> "Sin cupo"); "VCRID"; "g");
+                                "n"; CountRows(g)); n > 1)));;
+Set(varExpirados; CountRows(Filter(colVCR; Expirado)));;
+Set(varUtil;
+    Sum(ForAll(colCiclos As C;
+        {v: C.Plantas * DateDiff(C.FechaTrasplante; C.FechaFin; TimeUnit.Days)/7}); v)
+    / Max(1; varCapTotal * varSemanas) * 100);;
+
+ClearCollect(colKPI;
+    {Orden:1; Lab:"Plants requested";
+     Val: Text(varPedido; "#,##0");
+     Sub: CountRows(colVCR) & " VCR in list"; Alerta:"n"};
+    {Orden:2; Lab:"Plants placed";
+     Val: Text(varColocado; "#,##0");
+     Sub: Text(varColocado / Max(1; varPedido); "[$-en-US]0%") & " of demand";
+     Alerta: If(varColocado >= varPedido; "ok"; "n")};
+    {Orden:3; Lab:"No space in horizon";
+     Val: Text(varSinCupo; "#,##0");
+     Sub: If(varSinCupo > 0; "Needs extra greenhouse"; "All demand fits");
+     Alerta: If(varSinCupo > 0; "mal"; "ok")};
+    {Orden:4; Lab:"Expired VCR";
+     Val: Text(varExpirados; "#,##0");
+     Sub: "past Latest + " & varGracia & " days";
+     Alerta: If(varExpirados > 0; "mal"; "ok")};
+    {Orden:5; Lab:"Cycles scheduled";
+     Val: Text(CountRows(colCiclos); "#,##0");
+     Sub: varPartidos & " VCR split between houses"; Alerta:"n"};
+    {Orden:6; Lab:"Installed capacity";
+     Val: Text(varCapTotal; "#,##0");
+     Sub: CountRows(colInv) & " greenhouses"; Alerta:"n"};
+    {Orden:7; Lab:"Capacity utilization";
+     Val: Text(varUtil; "[$-en-US]0") & "%";
+     Sub: "plant-weeks over " & varSemanas & " weeks"; Alerta:"n"};
+    {Orden:8; Lab:"Cucurbits capacity";
+     Val: Text(varCapCuc; "#,##0");
+     Sub: "peak used " & Text(varUsoCuc; "#,##0") & " pl"; Alerta:"n"};
+    {Orden:9; Lab:"Cucurbits available";
+     Val: Text(varCapCuc - varUsoCuc; "#,##0");
+     Sub: Text(varUsoCuc / Max(1; varCapCuc); "[$-en-US]0%") & " used at peak";
+     Alerta: If(varUsoCuc > varCapCuc; "mal"; "ok")};
+    {Orden:10; Lab:"Solanaceae capacity";
+     Val: Text(varCapSol; "#,##0");
+     Sub: "peak used " & Text(varUsoSol; "#,##0") & " pl"; Alerta:"n"};
+    {Orden:11; Lab:"Solanaceae available";
+     Val: Text(varCapSol - varUsoSol; "#,##0");
+     Sub: Text(varUsoSol / Max(1; varCapSol); "[$-en-US]0%") & " used at peak";
+     Alerta: If(varUsoSol > varCapSol; "mal"; "ok")})
+
+Control: galKPI   Propiedad: ShowScrollbar  =true
+Control: galKPI   Propiedad: TemplateSize   =205
+Control: galKPI   Propiedad: Items          =SortByColumns(colKPI; "Orden"; SortOrder.Ascending)
+
+
+==============================================================================
+9. GALERIAS: ALTURAS FIJAS   (el arreglo mas importante)
+==============================================================================
+
+Dale altura propia a cada galeria grande. En cuanto la tengan, Power Apps
+vuelve a virtualizar y dibuja solo las filas visibles: galTimeline pasa de
+2.516 botones a unos 900, y galVCR de 186 filas a unas 11.
+
+Control: galTimeline   Propiedad: FillPortions   =0
+Control: galTimeline   Propiedad: Height         =420
+Control: galTimeline   Propiedad: ShowScrollbar  =true
+
+Control: galInv        Propiedad: FillPortions   =0
+Control: galInv        Propiedad: Height         =480
+Control: galInv        Propiedad: ShowScrollbar  =true
+
+Control: galVCR        Propiedad: FillPortions   =0
+Control: galVCR        Propiedad: Height         =420
+Control: galVCR        Propiedad: ShowScrollbar  =true
+
+Control: galCultivos   Propiedad: FillPortions   =0
+Control: galCultivos   Propiedad: Height         =280
+Control: galCultivos   Propiedad: ShowScrollbar  =true
+
+Y en btnCelda hay que quitar las tres formulas pesadas de adorno. Hoy Fill,
+HoverFill, Tooltip y RadiusTopRight hacen CADA UNA su propio
+First(Filter(colCiclos;...)). Con dejar solo Fill, el costo de la linea de
+tiempo baja a la cuarta parte.
+
+Control: btnCelda    Propiedad: HoverFill        =RGBA(44; 122; 93; 0,10)
+Control: btnCelda    Propiedad: PressedFill      =RGBA(44; 122; 93; 0,18)
+Control: btnCelda    Propiedad: Tooltip          ="W" & ThisItem.WN
+Control: btnCelda    Propiedad: RadiusTopRight   =0
+Control: btnCelda    Propiedad: RadiusBottomRight =0
+Control: btnCelda    Propiedad: RadiusTopLeft    =0
+Control: btnCelda    Propiedad: RadiusBottomLeft =0
+
+Control: btnCelda    Propiedad: Fill  (dejala asi, es la unica que debe pensar)
+
+=With({c: First(Filter(colCiclos;
+        Inv = lblCod.Text
+        && FechaTrasplante <= ThisItem.Fin
+        && FechaLibre >= ThisItem.Ini))};
+    If(IsBlank(c.Lote);
+        If(LookUp(colInv; Cod = lblCod.Text).Disp > ThisItem.Fin;
+           RGBA(185; 184; 172; 1);
+           RGBA(253; 253; 251; 1));
+       c.FechaFin >= ThisItem.Ini;
+        ColorValue(c.Hex);
+        RGBA(230; 230; 221; 1)))
+
+Si extranas el detalle al pasar el mouse, lo tienes al hacer clic: la celda ya
+abre el popup con todo el lote. Un tooltip que cuesta 2.500 barridos de tabla
+no vale la pena.
+
+
+==============================================================================
+10. galVCR: ESTATUS, EXPIRADOS Y FIN DE LAS SUMAS POR FILA
+==============================================================================
+
+Control:    galVCR
+Propiedad:  Items
+Accion:     REEMPLAZAR
+
+=Filter(
+    ForAll(colVCR As V;
+        With({E: LookUp(colVcrEst; VCRID = V.VCRID)};
+            {VCRID: V.VCRID; Nombre: V.Nombre; Cultivo: V.Cultivo; ES: V.ES;
+             Early: V.Early; Last: V.Last; TEarly: V.TEarly; TLast: V.TLast;
+             Plantas: V.Plantas; Vence: V.Vence; Expirado: V.Expirado;
+             Asignado: Coalesce(E.Asignado; 0);
+             Atrasado: Coalesce(E.Atrasado; false)}));
+    (varFCultivoVCR = "" || Cultivo = varFCultivoVCR)
+    && TEarly >= varVDesde
+    && TEarly <= varVHasta
+    && (varFEstVCR = ""
+        || (varFEstVCR = "PEND" && Asignado = 0 && !Expirado)
+        || (varFEstVCR = "PART" && Asignado > 0 && Asignado < Plantas)
+        || (varFEstVCR = "DONE" && Asignado >= Plantas)
+        || (varFEstVCR = "EXP"  && Expirado)))
+
+Ahora Asignado y Atrasado salen de colVcrEst con UN LookUp sobre una tabla
+chica, en vez de un Sum(Filter(colAsign)) por fila. Y los controles de la fila
+dejan de calcular lo mismo otra vez:
+
+Control: lblAsignado   Propiedad: Text   =Text(ThisItem.Asignado; "#,##0")
+
+Control: lblEstado     Propiedad: Text
+=If(ThisItem.Expirado; "Expired";
+    ThisItem.Asignado = 0; "Pending";
+    ThisItem.Atrasado; "Late";
+    ThisItem.Asignado < ThisItem.Plantas;
+        "Partial " & Text(ThisItem.Asignado / Max(1; ThisItem.Plantas); "[$-en-US]0%");
+    "Done")
+
+Control: lblEstado     Propiedad: Color
+=If(ThisItem.Expirado; RGBA(132; 131; 122; 1);
+    ThisItem.Asignado = 0; RGBA(208; 59; 59; 1);
+    ThisItem.Asignado < ThisItem.Plantas; RGBA(214; 139; 0; 1);
+    RGBA(12; 163; 12; 1))
+
+Control: lblVentana    Propiedad: Text
+   =Text(ThisItem.TEarly; "dd/mm/yyyy") & " - " & Text(ThisItem.TLast; "dd/mm/yyyy") &
+    If(ThisItem.Expirado; "  (vencio " & Text(ThisItem.Vence; "dd/mm") & ")"; "")
+
+Control: drpEstadoVCR  Propiedad: Items   =colOpcEstado
+   (ya tiene la opcion "Expired only" porque colOpcEstado se amplio en
+    App.Formulas; no hay que tocar nada mas)
+
+
+==============================================================================
+11. galInv: CULTIVOS EDITABLES POR CASA  (Tomato Cherry)
+==============================================================================
+
+Tomato Cherry es un cultivo mas de la familia Solanacea y va en las casas de
+tomate. Tres cosas:
+
+11.1  EL CULTIVO
+-----------------------------------------------------------------------------
+Ya va sembrado en PLN_Parametros por el OnStart nuevo (fila "Tomato Cherry",
+28 dias de semillero, 120 de ciclo, color #8e44ad). Si la lista ya existe con
+las 5 filas viejas, agregale la fila a mano en SharePoint con esos valores.
+
+IMPORTANTE: la columna Cultivo tiene que coincidir LETRA POR LETRA con el
+CropName que trae el Excel. Si en el archivo viene "Cherry Tomato", pon
+"Cherry Tomato" en la lista, no "Tomato Cherry".
+
+11.2  LAS CASAS QUE YA EXISTEN EN SHAREPOINT
+-----------------------------------------------------------------------------
+Las 34 filas que ya se sembraron guardan la cadena vieja ";Tomato;Pepper;".
+Hay que ampliarla una sola vez.
+
+Control:    btnFixCultivos      <- CONTROL NUEVO
+Tipo:       Classic/Button
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedades a fijar:
+   Text      ="Fix crops"
+   Visible   =false
+   Height    =1
+   Width     =1
+   OnSelect  (ver abajo)
+
+=ForAll(Filter(PLN_INVERNADEROS; Find("Tomato"; CultivosPermitidos) > 0) As G;
+    Patch(PLN_INVERNADEROS; G;
+        {CultivosPermitidos:
+            If(Find(";Tomato Cherry;"; G.CultivosPermitidos) > 0;
+               G.CultivosPermitidos;
+               Substitute(G.CultivosPermitidos; ";Tomato;"; ";Tomato;Tomato Cherry;"))}));;
+Notify("Catalogo de cultivos actualizado. Cierra y vuelve a abrir la app."; NotificationType.Success)
+
+Para dispararlo una vez: ponle Visible = true, dale clic, espera el Notify, y
+vuelvelo a poner en false. (O dejalo oculto y llamalo con Select(btnFixCultivos)
+desde cualquier otro boton una sola vez.)
+
+11.3  DE AHORA EN ADELANTE, SIN TOCAR CODIGO
+-----------------------------------------------------------------------------
+En galInv, lblCultivos es una etiqueta de solo lectura. Se cambia por un
+combobox multiple para que puedas decidir en pantalla que cultivos acepta cada
+casa, y se guarda en SharePoint.
+
+Control:    lblCultivos
+Accion:     ELIMINAR
+
+Control:    drpCultivosInv      <- CONTROL NUEVO
+Tipo:       ModernCombobox
+Ubicacion:  conApp > conBody > conINV > galInv > conInvFila
+            (insertar en el mismo lugar donde estaba lblCultivos, entre
+             lblTipo e inpDens_1)
+Propiedades a fijar:
+   Items                 =colCultivos
+   ItemDisplayText       =ThisItem.Cultivo
+   SelectMultiple        =true
+   FillPortions          =1
+   Height                =36
+   AlignInContainer      =AlignInContainer.Center
+   DefaultSelectedItems  (ver abajo)
+   OnChange              (ver abajo)
+
+DefaultSelectedItems:
+=With({s: ThisItem.Cultivos};
+    Filter(colCultivos As C; Find(";" & C.Cultivo & ";"; s) > 0))
+
+OnChange:
+=With({s: ";" & Concat(Self.SelectedItems As C; C.Cultivo; ";") & ";"};
+    Patch(colInv; LookUp(colInv; Cod = ThisItem.Cod); {Cultivos: s});;
+    Patch(PLN_INVERNADEROS; LookUp(PLN_INVERNADEROS; Codigo = ThisItem.Cod);
+        {CultivosPermitidos: s}))
+
+Control: lblHdrCultivos   Propiedad: Text   ="Crops allowed"
+
+
+==============================================================================
+12. btnGuardar: ESCRITURA MASIVA + ESTATUS DE VUELTA
+==============================================================================
+
+Dos cambios:
+  - Los dos ForAll(... Patch(..., Defaults(...), {...})) se cambian por
+    Collect(lista; ForAll(coleccion; {...})). Patch fila por fila manda una
+    llamada por registro; Collect con una tabla las manda por lotes. Con 400
+    asignaciones la diferencia es de minutos a segundos.
+  - Al final escribe el estatus de vuelta a PLN_VCR: Asignado / Parcial /
+    Pendiente / Cancelado. Eso es lo que hace que la proxima carga de Excel
+    solo te traiga los pendientes.
+
+Control:    btnGuardar
+Tipo:       Classic/Button
+Ubicacion:  conApp > conHeader > conCtrl
+Propiedad:  OnSelect
+Accion:     REEMPLAZAR COMPLETO
+
+=RemoveIf(PLN_Ciclos;     Anio = varAnio);;
+RemoveIf(PLN_Asignacion; Anio = varAnio);;
+
+Collect(PLN_Ciclos;
+    ForAll(colCiclos As C;
+        {Title:           C.Lote;
+         Invernadero:     C.Inv;
+         Cultivo:         C.Cultivo;
+         FechaTrasplante: C.FechaTrasplante;
+         FechaFinCiclo:   C.FechaFin;
+         FechaLibre:      C.FechaLibre;
+         PlantasLote:     C.Plantas;
+         CapacidadLote:   C.Cap;
+         Origen:          {Value: C.Origen};
+         Anio:            varAnio}));;
+
+Collect(PLN_Asignacion;
+    ForAll(colAsign As A;
+        {Title:           A.VCRID & "-" & A.Lote;
+         LoteId:          A.Lote;
+         VCRID:           A.VCRID;
+         VCRName:         A.Nombre;
+         Invernadero:     A.Inv;
+         Cultivo:         A.Cultivo;
+         Plantas:         A.Plantas;
+         FechaSiembra:    A.Siembra;
+         FechaTrasplante: A.Trasplante;
+         FechaFin:        A.Fin;
+         SemanaIni:       If(IsBlank(A.Trasplante); 0;
+                             RoundDown(DateDiff(varIniPlan; A.Trasplante; TimeUnit.Days)/7; 0) + 1);
+         SemanaFin:       If(IsBlank(A.Fin); 0;
+                             RoundDown(DateDiff(varIniPlan; A.Fin; TimeUnit.Days)/7; 0) + 1);
+         Estado:          {Value: A.Estado};
+         Origen:          {Value: A.Origen};
+         Anio:            varAnio}));;
+
+ForAll(colVCR As V;
+    With({a: Coalesce(LookUp(colVcrEst; VCRID = V.VCRID).Asignado; 0)};
+        Patch(PLN_VCR; LookUp(PLN_VCR; VCRID = V.VCRID && Anio = varAnio);
+            {Estado: If(a >= V.Plantas; "Asignado";
+                        a > 0;         "Parcial";
+                        V.Expirado;    "Cancelado";
+                        "Pendiente")})));;
+
+Notify("Plan guardado: " & CountRows(colCiclos) & " lotes y " &
+       CountRows(colAsign) & " asignaciones"; NotificationType.Success)
+
+Nota: este boton sigue siendo el mas lento de la app por naturaleza (borra y
+reescribe el ano completo). Eso es normal y solo pasa cuando tu lo pides.
+El UpdateContext({ctxCargando}) que tenias no servia de nada porque ningun
+control usa ctxCargando; lo quite. Si quieres un indicador, pon en
+lblMsgGlobal.Text el valor =varMsg y escribe varMsg antes y despues.
+
+
+==============================================================================
+13. CONTROLES A ELIMINAR
+==============================================================================
+
+Cada control existe y se evalua aunque este invisible. Estos no hacen nada:
+
+  Gallery1        copia de galGrupos (se lleva conGrupoItem_1, lblGrupo_1,
+                  Container3, btnSolo_1, btnMas_1, btnMenos_1)
+  conReglaEje     Visible = false, duplica htmlRegla (se lleva htmlMes y
+                  galReglaSem, que es otra galeria de 74 celdas evaluandose)
+  inpSem_1        TextInput invisible que solo contiene el texto "Window"
+  inpCiclo_1      igual
+  inpVent_1       igual
+  btnQuitarVCR    Visible = false, duplicado de Icon1
+  conFila         ManualLayout con Visible = false; OJO, NO lo elimines:
+                  adentro vive lblCod, del que depende btnCelda.Fill.
+                  Deja conFila y lblCod; puedes borrar btnFila y htmlFila,
+                  que si estan duplicados por Container2.
+
+Borrar htmlFila es importante: es otra formula enorme (dos Concat con calculos
+de porcentaje por cada lote) evaluandose en las 34 filas sin que se vea.
+
+
+==============================================================================
+14. SHAREPOINT: LISTAS NUEVAS Y COLUMNAS
+==============================================================================
+
+14.1  LISTA NUEVA:  PLN_Config
+-----------------------------------------------------------------------------
+  5 filas. La app las siembra sola la primera vez.
+
+  COLUMNA     TIPO DE DATO
+  ------------------------------------
+  Title       Una linea de texto      (la clave: Agrupar/Sobre/Prox/Ventana/Gracia)
+  Valor       Numero
+
+14.2  LISTA PLN_Parametros   (si ya la creaste, solo agrega la fila nueva)
+-----------------------------------------------------------------------------
+  COLUMNA         TIPO DE DATO
+  ----------------------------------------
+  Title           Una linea de texto
+  Cultivo         Una linea de texto
+  NombreES        Una linea de texto
+  Familia         Una linea de texto
+  DiasSemillero   Numero
+  DiasCiclo       Numero
+  DiasVentana     Numero
+  ColorHex        Una linea de texto
+
+  Si tu SharePoint esta en espanol y la columna se llama "Titulo" en vez de
+  "Title", cambia Title por el nombre que te muestre el editor de formulas.
+
+14.3  LISTA PLN_VCR   (columnas que hay que asegurar)
+-----------------------------------------------------------------------------
+  VCRID               Numero          <- INDEXADA
+  VCRName             Una linea de texto
+  CropName            Una linea de texto
+  SiteName            Una linea de texto   <- INDEXADA
+  EarliestStartDate   Fecha y hora (solo fecha)
+  LatestStartDate     Fecha y hora (solo fecha)   <- INDEXADA
+  VCRPlants           Numero
+  Estado              Una linea de texto   <- INDEXADA
+                      valores: Pendiente / Parcial / Asignado / Cancelado
+  Anio                Numero          <- INDEXADA
+
+  Estado como TEXTO, no como Eleccion. Si es Eleccion, el filtro delegable
+  Estado <> "Cancelado" no funciona igual y los Patch necesitan {Value: ...}.
+
+14.4  BIBLIOTECA NUEVA:  PLN_CargasVCR
+-----------------------------------------------------------------------------
+  Es una biblioteca de documentos (no una lista). Ahi caen los .xlsx.
+  Crea dentro una carpeta "Procesados".
+
+14.5  INDICES (Configuracion de la lista > Columnas indexadas)
+-----------------------------------------------------------------------------
+  PLN_VCR            VCRID, SiteName, Estado, Anio, LatestStartDate
+  PLN_INVERNADEROS   Codigo, Activo
+  PLN_Parametros     Cultivo
+  PLN_Config         Title
+  PLN_Ciclos         Invernadero, Anio
+  PLN_Asignacion     VCRID, Invernadero, Anio
+
+Sin esos indices, cuando la lista pase de 5.000 filas los filtros dejan de ser
+delegables y SharePoint te devuelve un error de umbral de vista en lugar de
+datos. Eso tambien se siente como "la app se traba".
+
+
+==============================================================================
+15. POWER AUTOMATE: CARGA DEL EXCEL Y BARRIDO DE VENCIDOS
+==============================================================================
+
+15.1  SI SE PUEDE, PERO NO DESDE UN SELECTOR DE ARCHIVOS DE POWER APPS
+-----------------------------------------------------------------------------
+Respuesta directa a tu pregunta: Power Apps canvas NO tiene un control que
+tome un .xlsx del disco y lo lea. "Agregar imagen" solo acepta imagenes y el
+control Adjuntos solo funciona amarrado a un formulario de lista.
+
+Lo que si funciona, y es lo que te recomiendo porque tiene menos piezas: el
+archivo se sube a la biblioteca PLN_CargasVCR y un flujo se dispara al
+detectar el archivo. La app solo abre la biblioteca.
+
+Control:    btnCargarExcel      <- CONTROL NUEVO
+Tipo:       Classic/Button
+Ubicacion:  conApp > conBody > conVCR > conFiltrosVCR
+Propiedades a fijar:
+   Text      ="Load Excel"
+   Width     =130
+   Height    =35
+   OnSelect  =Launch("https://TUTENANT.sharepoint.com/sites/TUSITIO/PLN_CargasVCR";
+                     {}; LaunchTarget.New)
+
+(cambia la URL por la de tu biblioteca; la copias del navegador)
+
+Despues de cargar y esperar al flujo, el usuario presiona:
+
+Control:    btnRefrescarVCR     <- CONTROL NUEVO
+Tipo:       Classic/Button
+Ubicacion:  conApp > conBody > conVCR > conFiltrosVCR
+Propiedades a fijar:
+   Text      ="Refresh VCR"
+   Width     =130
+   Height    =35
+   OnSelect  =Refresh(PLN_VCR);; Select(btnRecalcular)
+
+Si de verdad quieres el archivo adjunto DENTRO de la app, se puede: creas una
+lista PLN_Cargas con un formulario de edicion y su control Adjuntos, el usuario
+adjunta el .xlsx y hace SubmitForm, y el flujo se dispara con "Cuando se crea
+un elemento" y saca el adjunto. Son 3 controles mas y un paso mas de flujo,
+con el mismo resultado. Dime si lo prefieres y te doy ese armado.
+
+15.2  FLUJO 1: IMPORTAR EL EXCEL
+-----------------------------------------------------------------------------
+Nombre: PLN - Importar VCR desde Excel
+
+  1. Desencadenador: "Cuando se crea un archivo (solo propiedades)"
+       Sitio: tu sitio      Biblioteca: PLN_CargasVCR
+
+  2. Excel Online (Business) > "Obtener tablas"
+       Ubicacion / Biblioteca: las mismas
+       Archivo: Identificador del desencadenador
+     (el .xlsx DEBE tener los datos como TABLA de Excel, no como rango suelto.
+      En Excel: seleccionas los datos > Insertar > Tabla > la nombras VCR)
+
+  3. Excel Online (Business) > "Enumerar filas presentes en una tabla"
+       Archivo: Identificador del desencadenador
+       Tabla:   VCR
+
+     Columnas que debe traer el Excel, con estos nombres exactos:
+       VCRID  VCRName  CropName  SiteName  EarliestStartDate  LatestStartDate
+       VCRPlants  Anio
+
+  4. Aplicar a cada  ->  value (del paso 3)
+       4.1 SharePoint > "Obtener elementos"
+             Lista: PLN_VCR
+             Consulta de filtro: VCRID eq @{items('Aplicar_a_cada')?['VCRID']} and Anio eq @{items('Aplicar_a_cada')?['Anio']}
+             Numero maximo de elementos: 1
+
+       4.2 Condicion:  length(body('Obtener_elementos')?['value']) es igual a 0
+
+             SI (no existe)  -> SharePoint "Crear elemento" en PLN_VCR
+                   Title              = VCRName
+                   VCRID              = VCRID
+                   VCRName            = VCRName
+                   CropName           = CropName
+                   SiteName           = SiteName
+                   EarliestStartDate  = EarliestStartDate
+                   LatestStartDate    = LatestStartDate
+                   VCRPlants          = VCRPlants
+                   Anio               = Anio
+                   Estado             = Pendiente
+
+             NO (ya existe) -> SharePoint "Actualizar elemento" en PLN_VCR
+                   Id de la primera coincidencia
+                   actualiza SOLO: CropName, EarliestStartDate,
+                                   LatestStartDate, VCRPlants
+                   NO TOQUES Estado. Esto es lo que evita que un VCR ya
+                   asignado vuelva a aparecer como pendiente.
+
+  5. Fuera del bucle: SharePoint > "Mover archivo"
+       mueve el .xlsx a PLN_CargasVCR/Procesados
+       (asi el desencadenador no lo vuelve a procesar)
+
+  6. Opcional: Enviar correo con el conteo de creados y actualizados.
+
+15.3  FLUJO 2: BARRIDO DIARIO DE VENCIDOS  (la regla de 20 dias persistente)
+-----------------------------------------------------------------------------
+Nombre: PLN - Cancelar VCR vencidos
+
+  1. Desencadenador: Periodicidad, 1 vez al dia, 06:00 America/Guatemala
+
+  2. SharePoint > "Obtener elementos"  en PLN_VCR
+       Consulta de filtro:
+         Estado ne 'Asignado' and Estado ne 'Cancelado' and LatestStartDate lt '@{formatDateTime(addDays(utcNow(),-20),''yyyy-MM-dd'')}'
+
+  3. Aplicar a cada -> "Actualizar elemento"
+       Estado = Cancelado
+
+Asi la regla queda escrita en la base de datos y no depende de que alguien
+abra la app. La app igual calcula Expirado con Today() para el caso de que el
+flujo todavia no haya corrido ese dia: las dos cosas se complementan.
+
+OJO con los 20 dias: si cambias varGracia en la app a otro numero, cambia
+tambien el addDays(utcNow(),-20) del flujo, o no van a coincidir.
+
+15.4  EL CICLO COMPLETO QUE PEDISTE
+-----------------------------------------------------------------------------
+  1. Subes el Excel a PLN_CargasVCR.
+  2. El flujo crea los nuevos como Pendiente y actualiza fechas y plantas de
+     los que ya estaban, sin tocar su estatus.
+  3. Abres la app. btnRecalcular trae solo Estado <> Cancelado y <> Asignado,
+     o sea los pendientes y los parciales.
+  4. Asignas (btnAuto o a mano) y presionas Save plan.
+  5. Save plan escribe PLN_Ciclos, PLN_Asignacion y marca cada VCR como
+     Asignado / Parcial / Pendiente / Cancelado en PLN_VCR.
+  6. La siguiente vez que cargues un Excel, los Asignado ya no vuelven a la
+     lista de pendientes.
+  7. Si quitas un VCR de la linea de tiempo y vuelves a guardar, su estatus
+     regresa solo a Pendiente, porque el paso 5 lo recalcula desde colVcrEst.
+
+
+==============================================================================
+16. ORDEN DE APLICACION
+==============================================================================
+
+Hazlo en este orden o vas a ver errores intermedios que no son reales:
+
+   1. Crea PLN_Config. Agrega la fila Tomato Cherry a PLN_Parametros.
+      Crea la biblioteca PLN_CargasVCR con su carpeta Procesados.
+      Pon los indices del punto 14.5.
+   2. Conecta PLN_Config en Agregar datos.
+   3. Pega App.Formulas (punto 2). Vas a ver errores de "nombre ya en uso":
+      es normal, se van en el paso siguiente.
+   4. Pega App.OnStart (punto 3). Los errores del paso 3 desaparecen.
+   5. btnAnio . OnSelect  ->  borra todo y deja:   =Select(btnRecalcular)
+      (varIniPlan, varFinPlan, varSemanas, colSemanas y colMeses ya se
+       recalculan solos al cambiar varAnio; los Set que tenia ahora son
+       ilegales porque son formulas con nombre)
+   6. inpCap . OnChange  ->  borra la linea  Set(varCapTotal; Sum(colInv; Cap));
+      (varCapTotal es formula con nombre y ya no se puede Set)
+   7. scrPlan.OnVisible (punto 4), btnRecalcular (5), btnAuto (6),
+      btnAgrupar (7), btnKPI (8).
+   8. Las alturas de galerias y btnCelda (punto 9).
+   9. galVCR y sus etiquetas (punto 10).
+  10. btnFixCultivos: Visible true, un clic, Visible false.
+  11. Elimina lblCultivos, agrega drpCultivosInv (punto 11.3).
+  12. btnGuardar (punto 12).
+  13. Elimina los controles del punto 13.
+  14. btnCargarExcel y btnRefrescarVCR (punto 15.1).
+  15. Arma los dos flujos (15.2 y 15.3).
+
+REGLA QUE YA TE COSTO 137 ERRORES
+Dentro de un mismo ClearCollect(...) o Table(...) los registros se separan con
+UN punto y coma (;). El doble punto y coma (;;) solo va entre instrucciones
+completas. Si Power Apps te senala un error en la ultima linea, el ;; de mas
+esta dentro de un parentesis mucho mas arriba.
+
+==============================================================================
+FIN DEL DOCUMENTO
+==============================================================================
